@@ -11,3 +11,4 @@ keras
 tensorflow
 pyyaml
 tiler
+geopy
