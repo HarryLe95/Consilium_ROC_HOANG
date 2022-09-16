@@ -1,5 +1,6 @@
 from src.utils import logger_init, get_argparse
-from src.ROC_Classifier import ROC_Classifier, ROC_Generator
+from src.ROC_Classifier.Trainer import ROC_Classifier
+from src.ROC_Classifier.DataGenerator import ROC_Generator
 from copy import deepcopy 
 import numpy as np 
 
