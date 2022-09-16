@@ -113,9 +113,25 @@ class S3Manager(S3):
             next_keys = [item['Key'] for item in response['Contents']]
             keys.extend(next_keys)
         return keys
-
+    
     @staticmethod
-    def get_filename(self,
+    def parse_date(date:str, strp_format='%Y-%m-%d') -> datetime:
+        """Parse str as datetime object
+
+        Args:
+            date (str): datestring
+            strp_format (str, optional): format. Defaults to '%Y-%m-%d'.
+
+        Returns:
+            datetime: datetime object from date
+        """
+        try:
+            return datetime.strptime(date, strp_format)
+        except:
+            raise ValueError(f"Incompatiable input date {date} and format: {strp_format}")
+
+    @classmethod
+    def get_filename(cls,
                 item_cd:str, 
                 file_prefix:str, 
                 start:datetime|str, 
@@ -141,9 +157,9 @@ class S3Manager(S3):
             str: formatted filename 
         """
         if isinstance(start,str):
-            start = self.parse_date(start, strp_format)
+            start = cls.parse_date(start, strp_format)
         if isinstance(end,str):
-            end = self.parse_date(end, strp_format)
+            end = cls.parse_date(end, strp_format)
         fn = '{}_{}_{}_{}.{}'.format(item_cd, 
                                     file_prefix, 
                                     start.strftime(strf_format), 
@@ -151,26 +167,21 @@ class S3Manager(S3):
                                     file_ext)
         return fn
 
-    @staticmethod
-    def _parse_date(self, date:str, strp_format='%Y-%m-%d') -> datetime:
-        """Parse str as datetime object
+    @classmethod
+    def get_date_range(self, start_date:str, end_date:str) -> pd.Series:
+        """Get a data
 
         Args:
-            date (str): datestring
-            strp_format (str, optional): format. Defaults to '%Y-%m-%d'.
+            start_date (str): _description_
+            end_date (str): _description_
 
         Returns:
-            datetime: datetime object from date
+            pd.Series: _description_
         """
-        try:
-            return datetime.strptime(date, strp_format)
-        except:
-            raise ValueError(f"Incompatiable input date {date} and format: {strp_format}")
-
-    @staticmethod
-    def _get_date_range(self, start_date:str, end_date:str) -> pd.Series:
-        start_date = self._parse_date(start_date)
-        end_date = self._parse_date(end_date)
+        start_date = self.parse_date(start_date)
+        end_date = self.parse_date(end_date)
         return pd.date_range(start_date, end_date, freq='MS')
+    
+    
 
     
