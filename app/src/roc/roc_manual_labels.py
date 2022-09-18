@@ -57,6 +57,24 @@ state = roc.state.init()
 
 ###########################################################################
 # CHECKED
+# WELL CLASSES (NOTE wells may change between classes)
+# 1=Normal (smooth voltage)
+# 2=SPAC (regular frequent voltage dips due to high current device)
+# 3=Cycling (irregular voltage steps correlated with well cycling state - flow and thp)
+# 4=Variable (irregular voltage steps not correlated with flow and/or thp)
+#
+# VOLTAGE CLASSES
+# 0=Normal
+# 1=Battery Capacity
+# 2=SIDLV - Battery Capacity
+# 3=Battery Degrading
+# 4=Battery Fault
+# 5=SIDLV - Battery Fault
+# 6=Charging Fault
+# 7=Battery Recovering
+# 8=Data Anomaly
+# 9=Cloud Cover
+state['well_classes'] = {}
 state['preset_targets'] = {}
 state['preset_targets']['ACRUS1'] = {}
 dy =  datetime(2018, 1, 1)
@@ -70,21 +88,22 @@ state['preset_targets']['ACRUS1'][datetime(2018, 2, 27)] = 3
 state['preset_targets']['ACRUS1'][datetime(2018, 3, 8)] = 1
 state['preset_targets']['ACRUS1'][datetime(2018, 3, 9)] = 1
 # CHECKED
+state['well_classes']['BIGL22'] = [1]
 state['preset_targets']['BIGL22'] = {}
 dy =  datetime(2022, 1, 1)
-while dy < datetime(2022, 7, 10):
+while dy < datetime(2022, 7, 1):
     state['preset_targets']['BIGL22'][dy] = 0
     dy = dy + timedelta(days=1)
 state['preset_targets']['BIGL22'][datetime(2022, 1, 17)] = 9
 state['preset_targets']['BIGL22'][datetime(2022, 1, 18)] = 7
 state['preset_targets']['BIGL22'][datetime(2022, 1, 19)] = 7
-state['preset_targets']['BIGL22'][datetime(2022, 1, 22)] = 2
-state['preset_targets']['BIGL22'][datetime(2022, 1, 23)] = 2
-state['preset_targets']['BIGL22'][datetime(2022, 1, 24)] = 2
+state['preset_targets']['BIGL22'][datetime(2022, 1, 22)] = 9
+state['preset_targets']['BIGL22'][datetime(2022, 1, 23)] = 9
+state['preset_targets']['BIGL22'][datetime(2022, 1, 24)] = 9
 state['preset_targets']['BIGL22'][datetime(2022, 1, 25)] = 7
 state['preset_targets']['BIGL22'][datetime(2022, 1, 26)] = 7
-state['preset_targets']['BIGL22'][datetime(2022, 2, 1)] = 2
-state['preset_targets']['BIGL22'][datetime(2022, 2, 2)] = 2
+state['preset_targets']['BIGL22'][datetime(2022, 2, 1)] = 9
+state['preset_targets']['BIGL22'][datetime(2022, 2, 2)] = 9
 state['preset_targets']['BIGL22'][datetime(2022, 2, 3)] = 7
 state['preset_targets']['BIGL22'][datetime(2022, 2, 10)] = 3
 state['preset_targets']['BIGL22'][datetime(2022, 2, 11)] = 5
@@ -97,11 +116,88 @@ state['preset_targets']['BIGL22'][datetime(2022, 3, 25)] = 7
 state['preset_targets']['BIGL22'][datetime(2022, 4, 18)] = 9
 state['preset_targets']['BIGL22'][datetime(2022, 4, 19)] = 7
 state['preset_targets']['BIGL22'][datetime(2022, 4, 24)] = 9
-state['preset_targets']['BIGL22'][datetime(2022, 4, 25)] = 1
+state['preset_targets']['BIGL22'][datetime(2022, 4, 25)] = 9
 state['preset_targets']['BIGL22'][datetime(2022, 4, 26)] = 2
 state['preset_targets']['BIGL22'][datetime(2022, 4, 27)] = 7
 state['preset_targets']['BIGL22'][datetime(2022, 4, 28)] = 7
 state['preset_targets']['BIGL22'][datetime(2022, 4, 29)] = 7
+state['preset_targets']['BIGL22'][datetime(2022, 4, 30)] = 9
+state['preset_targets']['BIGL22'][datetime(2022, 5, 1)] = 7
+state['preset_targets']['BIGL22'][datetime(2022, 5, 2)] = 7
+state['preset_targets']['BIGL22'][datetime(2022, 5, 3)] = 7
+state['preset_targets']['BIGL22'][datetime(2022, 5, 4)] = 7
+state['preset_targets']['BIGL22'][datetime(2022, 5, 10)] = 9
+state['preset_targets']['BIGL22'][datetime(2022, 5, 11)] = 8
+state['preset_targets']['BIGL22'][datetime(2022, 5, 12)] = 8
+state['preset_targets']['BIGL22'][datetime(2022, 5, 13)] = 5
+state['preset_targets']['BIGL22'][datetime(2022, 5, 14)] = 7
+state['preset_targets']['BIGL22'][datetime(2022, 5, 18)] = 9
+state['preset_targets']['BIGL22'][datetime(2022, 5, 19)] = 9
+state['preset_targets']['BIGL22'][datetime(2022, 5, 20)] = 1
+state['preset_targets']['BIGL22'][datetime(2022, 5, 21)] = 7
+state['preset_targets']['BIGL22'][datetime(2022, 5, 22)] = 7
+state['preset_targets']['BIGL22'][datetime(2022, 5, 23)] = 7
+state['preset_targets']['BIGL22'][datetime(2022, 5, 28)] = 1
+state['preset_targets']['BIGL22'][datetime(2022, 5, 29)] = 2
+state['preset_targets']['BIGL22'][datetime(2022, 5, 30)] = 5
+state['preset_targets']['BIGL22'][datetime(2022, 5, 31)] = 8
+state['preset_targets']['BIGL22'][datetime(2022, 6, 1)] = 5
+state['preset_targets']['BIGL22'][datetime(2022, 6, 2)] = 5
+state['preset_targets']['BIGL22'][datetime(2022, 6, 3)] = 5
+state['preset_targets']['BIGL22'][datetime(2022, 6, 4)] = 7
+state['preset_targets']['BIGL22'][datetime(2022, 6, 5)] = 7
+state['preset_targets']['BIGL22'][datetime(2022, 6, 12)] = 2
+state['preset_targets']['BIGL22'][datetime(2022, 6, 13)] = 8
+state['preset_targets']['BIGL22'][datetime(2022, 6, 14)] = 5
+state['preset_targets']['BIGL22'][datetime(2022, 6, 15)] = 5
+state['preset_targets']['BIGL22'][datetime(2022, 6, 16)] = 5
+state['preset_targets']['BIGL22'][datetime(2022, 6, 17)] = 5
+state['preset_targets']['BIGL22'][datetime(2022, 6, 18)] = 5
+state['preset_targets']['BIGL22'][datetime(2022, 6, 19)] = 8
+state['preset_targets']['BIGL22'][datetime(2022, 6, 20)] = 5
+state['preset_targets']['BIGL22'][datetime(2022, 6, 21)] = 7
+state['preset_targets']['BIGL22'][datetime(2022, 6, 25)] = 9
+state['preset_targets']['BIGL22'][datetime(2022, 6, 26)] = 7
+state['preset_targets']['BIGL22'][datetime(2022, 6, 29)] = 9
+state['preset_targets']['BIGL22'][datetime(2022, 6, 30)] = 7
+# CHECKED
+state['well_classes']['BIGL20'] = [1,3]
+state['preset_targets']['BIGL20'] = {}
+dy =  datetime(2022, 1, 1)
+while dy < datetime(2022, 7, 1):
+    state['preset_targets']['BIGL20'][dy] = 0
+    dy = dy + timedelta(days=1)
+state['preset_targets']['BIGL20'][datetime(2022, 1, 17)] = 9
+state['preset_targets']['BIGL20'][datetime(2022, 1, 18)] = 7
+state['preset_targets']['BIGL20'][datetime(2022, 1, 22)] = 9
+state['preset_targets']['BIGL20'][datetime(2022, 1, 23)] = 1
+state['preset_targets']['BIGL20'][datetime(2022, 1, 24)] = 1
+state['preset_targets']['BIGL20'][datetime(2022, 1, 25)] = 7
+state['preset_targets']['BIGL20'][datetime(2022, 1, 26)] = 7
+state['preset_targets']['BIGL20'][datetime(2022, 2, 1)] = 9
+state['preset_targets']['BIGL20'][datetime(2022, 2, 2)] = 1
+state['preset_targets']['BIGL20'][datetime(2022, 2, 3)] = 7
+state['preset_targets']['BIGL20'][datetime(2022, 3, 24)] = 9
+state['preset_targets']['BIGL20'][datetime(2022, 3, 25)] = 7
+state['preset_targets']['BIGL20'][datetime(2022, 4, 18)] = 9
+state['preset_targets']['BIGL20'][datetime(2022, 4, 19)] = 7
+state['preset_targets']['BIGL20'][datetime(2022, 4, 20)] = 7
+state['preset_targets']['BIGL20'][datetime(2022, 4, 24)] = 9
+state['preset_targets']['BIGL20'][datetime(2022, 4, 25)] = 9
+state['preset_targets']['BIGL20'][datetime(2022, 4, 26)] = 1
+state['preset_targets']['BIGL20'][datetime(2022, 4, 27)] = 7
+state['preset_targets']['BIGL20'][datetime(2022, 4, 30)] = 9
+state['preset_targets']['BIGL20'][datetime(2022, 5, 10)] = 1
+state['preset_targets']['BIGL20'][datetime(2022, 5, 11)] = 1
+state['preset_targets']['BIGL20'][datetime(2022, 5, 12)] = 7
+dy =  datetime(2022, 5, 15)
+while dy < datetime(2022, 6, 9):
+    state['preset_targets']['BIGL20'][dy] = 8
+    dy = dy + timedelta(days=1)
+state['preset_targets']['BIGL20'][datetime(2022, 6, 19)] = 9
+state['preset_targets']['BIGL20'][datetime(2022, 6, 20)] = 7
+state['preset_targets']['BIGL20'][datetime(2022, 6, 29)] = 1
+state['preset_targets']['BIGL20'][datetime(2022, 6, 30)] = 7
 # CHECKED
 state['preset_targets']['MOOM115'] = {}
 dy =  datetime(2022, 1, 1)
@@ -159,6 +255,43 @@ state['preset_targets']['MOOM115'][datetime(2022, 6, 20)] = 7
 state['preset_targets']['MOOM115'][datetime(2022, 6, 29)] = 9
 state['preset_targets']['MOOM115'][datetime(2022, 6, 30)] = 7
 state['preset_targets']['MOOM115'][datetime(2022, 7, 1)] = 9
+# CHECKED - NOTE THAT THIS WELL HAS AN INVALID CALIBRATION (VOLTAGE RANGE IS 17-18.5)
+state['well_classes']['MOOM157'] = [3,4]
+state['preset_targets']['MOOM157'] = {}
+dy =  datetime(2022, 1, 1)
+while dy < datetime(2022, 7, 11):
+    state['preset_targets']['MOOM157'][dy] = 0
+    dy = dy + timedelta(days=1)
+state['preset_targets']['MOOM157'][datetime(2022, 1, 17)] = 1
+state['preset_targets']['MOOM157'][datetime(2022, 1, 18)] = 7
+state['preset_targets']['MOOM157'][datetime(2022, 1, 19)] = 7
+state['preset_targets']['MOOM157'][datetime(2022, 1, 21)] = 3
+state['preset_targets']['MOOM157'][datetime(2022, 1, 22)] = 1
+state['preset_targets']['MOOM157'][datetime(2022, 1, 23)] = 9
+state['preset_targets']['MOOM157'][datetime(2022, 1, 24)] = 1
+state['preset_targets']['MOOM157'][datetime(2022, 1, 25)] = 7
+state['preset_targets']['MOOM157'][datetime(2022, 1, 26)] = 7
+state['preset_targets']['MOOM157'][datetime(2022, 1, 30)] = 1
+state['preset_targets']['MOOM157'][datetime(2022, 1, 31)] = 7
+state['preset_targets']['MOOM157'][datetime(2022, 2, 1)] = 9
+state['preset_targets']['MOOM157'][datetime(2022, 2, 2)] = 1
+state['preset_targets']['MOOM157'][datetime(2022, 2, 3)] = 7
+dy =  datetime(2022, 2, 13)
+while dy < datetime(2022, 5, 12):
+    state['preset_targets']['MOOM157'][dy] = 8
+    dy = dy + timedelta(days=1)
+state['preset_targets']['MOOM157'][datetime(2022, 5, 19)] = 9
+state['preset_targets']['MOOM157'][datetime(2022, 5, 20)] = 7
+state['preset_targets']['MOOM157'][datetime(2022, 5, 29)] = 9
+state['preset_targets']['MOOM157'][datetime(2022, 5, 30)] = 7
+state['preset_targets']['MOOM157'][datetime(2022, 6, 1)] = 9
+state['preset_targets']['MOOM157'][datetime(2022, 6, 2)] = 9
+state['preset_targets']['MOOM157'][datetime(2022, 6, 3)] = 9
+state['preset_targets']['MOOM157'][datetime(2022, 6, 4)] = 7
+state['preset_targets']['MOOM157'][datetime(2022, 6, 19)] = 9
+state['preset_targets']['MOOM157'][datetime(2022, 6, 20)] = 7
+state['preset_targets']['MOOM157'][datetime(2022, 6, 29)] = 9
+state['preset_targets']['MOOM157'][datetime(2022, 6, 30)] = 7
 # CHECKED
 state['preset_targets']['POND1'] = {}
 state['preset_targets']['POND1'][datetime(2018, 6, 25)] = 5 # or 2
@@ -392,6 +525,30 @@ state['preset_targets']['TIRRW1'][datetime(2018, 6, 2)] = 5
 state['preset_targets']['TIRRW1'][datetime(2018, 6, 3)] = 5
 state['preset_targets']['TIRRW1'][datetime(2018, 6, 4)] = 5
 state['preset_targets']['TIRRW1'][datetime(2018, 6, 5)] = 5
+# CHECKED
+state['well_classes']['TOOL16'] = [1]
+state['preset_targets']['TOOL16'] = {}
+dy =  datetime(2022, 1, 1)
+while dy < datetime(2022, 6, 27):
+    state['preset_targets']['TOOL16'][dy] = 0
+    dy = dy + timedelta(days=1)
+state['preset_targets']['TOOL16'][datetime(2022, 1, 23)] = 9
+state['preset_targets']['TOOL16'][datetime(2022, 1, 24)] = 1
+state['preset_targets']['TOOL16'][datetime(2022, 1, 25)] = 7
+state['preset_targets']['TOOL16'][datetime(2022, 4, 24)] = 9
+state['preset_targets']['TOOL16'][datetime(2022, 4, 25)] = 9
+state['preset_targets']['TOOL16'][datetime(2022, 4, 26)] = 9
+state['preset_targets']['TOOL16'][datetime(2022, 4, 27)] = 7
+state['preset_targets']['TOOL16'][datetime(2022, 5, 10)] = 9
+state['preset_targets']['TOOL16'][datetime(2022, 5, 11)] = 1
+state['preset_targets']['TOOL16'][datetime(2022, 5, 12)] = 7
+state['preset_targets']['TOOL16'][datetime(2022, 5, 19)] = 9
+state['preset_targets']['TOOL16'][datetime(2022, 5, 20)] = 7
+state['preset_targets']['TOOL16'][datetime(2022, 5, 29)] = 9
+state['preset_targets']['TOOL16'][datetime(2022, 5, 30)] = 7
+state['preset_targets']['TOOL16'][datetime(2022, 6, 2)] = 9
+state['preset_targets']['TOOL16'][datetime(2022, 6, 3)] = 1
+state['preset_targets']['TOOL16'][datetime(2022, 6, 4)] = 7
 # CHECKED
 state['preset_targets']['TOOL29'] = {}
 dy =  datetime(2018, 4, 14)
@@ -792,9 +949,9 @@ state['procdata_con'] = connect_(config['procdata_info'])
 classes = ['Normal', 'Battery Capacity', 'SIDLV - Battery Capacity', 
            'Battery Degrading', 'Battery Fault', 'SIDLV - Battery Fault', 
            'Charging Fault', 'Battery Recovering', 'Data Anomaly', 'Cloud Cover']
-ignore_wells = []
-"""
+
 if __name__ == "__main__":
+    ignore_wells = []
     for wn in state['preset_targets']:
         state['well_cd'] = wn
         if wn in ignore_wells:
@@ -837,4 +994,3 @@ if __name__ == "__main__":
             ax[2].plot(df['DTSMIN'], df['FLOW_I'], color='orange', marker='.', alpha=.5)
             plt.show()
             plt.close()
-"""
