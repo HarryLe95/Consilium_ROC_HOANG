@@ -162,6 +162,8 @@ cython_debug/
 #Ignore data and model 
 data/
 model/
+viz/
+*.png
 #Private Info
 RDP.sh
 **rdp-key**
