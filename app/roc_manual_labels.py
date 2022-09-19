@@ -5,12 +5,13 @@ Created on Wed Jun 29 17:31:29 2022
 @author: Steve Lechowicz
 """
 from datetime import datetime, timedelta
-import aau.advancedanalytics_util as aau
+import src.aau.advancedanalytics_util as aau
 import pandas as pd
 from matplotlib import pyplot as plt
-
-import roc._manual_labels_config
-import roc.state
+import yaml 
+import src.roc._manual_labels_config as roc_manual_labels_config
+import src.roc.state as roc_state
+from src.utils.PathManager import Paths as Path 
 
 def connect_(info, connection_type=None):
     if connection_type is None:
@@ -52,8 +53,8 @@ def get_filename(state, start, end):
     return fn
 
 # Initialise the config and state
-config = roc._manual_labels_config.init()
-state = roc.state.init()
+config = roc_manual_labels_config.init()
+state = roc_state.init()
 
 ###########################################################################
 # CHECKED
@@ -951,46 +952,5 @@ classes = ['Normal', 'Battery Capacity', 'SIDLV - Battery Capacity',
            'Charging Fault', 'Battery Recovering', 'Data Anomaly', 'Cloud Cover']
 
 if __name__ == "__main__":
-    ignore_wells = []
-    for wn in state['preset_targets']:
-        state['well_cd'] = wn
-        if wn in ignore_wells:
-            continue
-        alldf = pd.DataFrame()
-        allstart = datetime.utcnow()
-        allend = allstart
-        for d in state['preset_targets'][wn]:
-            if d < allstart or d > allend:
-                fs, fe = get_filestartend(state, d)
-                fn = get_filename(state, fs, fe)
-                kwargs = config['procdata_kwargs']
-                kwargs['file'] = fn
-                try:
-                    result = state['procdata_con'].read(sql=None, args={}, edit=[], orient='df', do_raise=False, **kwargs)
-                    alldf = pd.concat([alldf, result], ignore_index=True)
-                    alldf.sort_values(by=['DTSMIN'], inplace=True)
-                    allstart = alldf.head(1).iloc[0]['DTSMIN']
-                    allend = alldf.tail(1).iloc[0]['DTSMIN']
-                except:
-                    print ('{} preset target {} out of data range'.format(wn, d))
-                    continue
-            c = state['preset_targets'][wn][d]
-            cl = classes[c]
-            f, ax = plt.subplots(3,1)
-            f.set_size_inches(20,20)
-            for a in ax:
-                a.grid(True)
-                a.axvline(pd.Timestamp(d), color='r')
-                a.axvline(pd.Timestamp(d)+timedelta(days=1), color='r')
-            start = pd.Timestamp(d) - timedelta(days=3)
-            end = pd.Timestamp(d) + timedelta(days=3)
-            df = alldf[(alldf['DTSMIN'] >= start) & (alldf['DTSMIN'] <= end) & (alldf['ROC_VOLTAGE_IFILL'] > 0)]
-            ax[0].set_title('{} {} VOLTAGE {} - {} - {} m=ifill o=interp c=raw'.format(wn, cl, start, d, end))
-            ax[0].scatter(df['DTSMIN'], df['ROC_VOLTAGE_IFILL'], color='m', marker='.', alpha=.5)
-            ax[0].scatter(df['DTSMIN'], df['ROC_VOLTAGE'], color='cyan', marker='.', alpha=.5)
-            ax[1].set_title('PRESSURE_TH_I')
-            ax[1].plot(df['DTSMIN'], df['PRESSURE_TH_I'], color='b', marker='.', alpha=.5)
-            ax[2].set_title('FLOW_I')
-            ax[2].plot(df['DTSMIN'], df['FLOW_I'], color='orange', marker='.', alpha=.5)
-            plt.show()
-            plt.close()
+    with open(Path.config("well_labels.yaml"),'w') as file: 
+        yaml.dump(state['preset_targets'], file)

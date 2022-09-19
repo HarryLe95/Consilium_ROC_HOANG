@@ -1,18 +1,164 @@
 from src.aau.S3Manager import S3Manager
+from src.utils.PathManager import Paths as Path
 import logging 
-from datetime import datetime as datetime 
+from datetime import datetime as datetime
+from datetime import timedelta 
 import pandas as pd 
 import numpy as np 
-
+import yaml
+from geopy import distance 
+from typing import List 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 class S3ROCManager(S3Manager):
+    """S3 aau wrapper that provides a convenient interface for working with ROC data.
+
+    In summary, there are three types of ROC data that S3ROCManager handles
+    - processed_data: raw ROC data from battery sensors containing ROC_VOLTAGE, FLOW, PRESSTURE_TH and their repective mask and corresponding timestamp.
+    - weather_data: raw data from weather stations, with features including cloudcover, radiations, and corresponding timestamp.
+    - labelled_data: csv data that is a combination of processed_data, weather_data, and manual labels stored in a yaml config file. 
+
+    For convenience, file paths, prefixes, file_extension and related S3 keywords are stored in processed_data_dict and solar_data_dict. 
+
+    Args:
+        S3Manager (aau.S3Manager): inherits S3Manager from aau.S3Manager 
+    """
     def __init__(self, info:dict):
         super().__init__(info)
         self.info = info 
         self.init_processed_data()
         self.init_solar_data()
+
+        if not Path.config("nearest_station.yaml").exists():
+            self.nearest_station = self.get_nearest_station()
+        else:
+            with open(Path.config("nearest_station.yaml"),'r') as file:
+                self.nearest_station = yaml.safe_load(file)
+        self.all_labelled_wells = list(self.nearest_station.keys())
+        self.all_stations = list(set(self.nearest_station.values()))
+
+    def init_label_data(self):
+        with open(Path.config("well_labels.yaml"),'r') as file:
+            self.label_dict = yaml.safe_load(file)
+
+    @staticmethod
+    def process_well_location(file:str='well_location.csv'):
+        well_loc_df = pd.read_csv(Path.data(file))
+        well_loc_df['COORD'] = well_loc_df.apply(lambda x: (x.LATITUDE, x.LONGITUDE), axis=1)
+        well_loc_df.to_csv(Path.data(file),index=False)
+        well_loc_df.set_index("WELL_CD", inplace=True)
+        well_loc_df = well_loc_df.loc[:,['COORD']]
+        return well_loc_df
+    
+    @staticmethod
+    def process_station_location(file:str='station_location.csv'):
+        station_loc_df = pd.read_csv(Path.data(file))
+        if np.any(station_loc_df.Long.values < 0):
+            rename_dict = {'Lat': "Long", "Long": "Lat"}
+            station_loc_df.rename(columns=rename_dict, inplace=True)
+        station_loc_df['COORD'] = station_loc_df.apply(lambda x: (x.Lat, x.Long), axis=1)
+        station_loc_df.to_csv(Path.data(file),index=False)
+        station_loc_df.set_index("Location", inplace=True)
+        station_loc_df = station_loc_df.loc[:,["COORD"]]
+        return station_loc_df
+
+    def get_well_location(self, file:str="well_location.csv") -> pd.DataFrame :
+        """Get well location dataframe from local storage and preprocess
+
+        Args:
+            file (str, optional): well location file name. Defaults to "well_location.csv".
+
+        Returns:
+            pd.DataFrame: dataframe whose index is WELL_CD and whose column is COORD
+        """
+        try:
+            df = pd.read_csv(Path.data(file), index_col = "WELL_CD", usecols =["WELL_CD", "COORD"])
+            df['COORD'] = df.eval(df['COORD'])
+            return df
+        except Exception as e:
+            logger.error(f"Error encountered: {e}")
+            return self.process_well_location(file)
+
+    def get_station_location(self, file:str='station_location.csv') -> pd.DataFrame :
+        """Get station location dataframe 
+
+        Args:
+            file (str, optional): station location file name. Defaults to 'station_location.csv'.
+
+        Returns:
+            pd.DataFrame: dataframe whose index is Location and whose column is COORD
+        """
+        try:
+            df = pd.read_csv(Path.data(file), index_col='Location', usecols=['Location', 'COORD'])
+            df['COORD'] = df.eval(df['COORD'])
+            return df 
+        except Exception as e:
+            logger.error(f"Error encountered: {e}")
+            return self.process_station_location(file)
+
+    def get_distance_matrix(self, first: pd.DataFrame, second: pd.DataFrame, first_coord_column:str="COORD", second_coord_column:str="COORD") -> pd.DataFrame: 
+        """Generate df of the distance between every pair of the first and second group.
+        
+        The final_df is of size (MxN) where M and N are the numbers of row and column of the first and second dataframe respectively. 
+        The index and columns of final_df are the indices of the first and second dataframes.
+
+        Args:
+            first (pd.DataFrame): first group df, should have a coordinate column containing (lat,long) tuple, and index containing the well's name
+            second (pd.DataFrame): second group df, should havea coordinate column containing (lat,long) tuple and index containing the well's name
+            first_coord_column (str, optional): name of coordinate column in the first df. Defaults to "COORD".
+            second_coord_column (str, optional): name of the coordinate column in the second df. Defaults to "COORD".
+
+        Returns:
+            pd.DataFrame: final_df containing the pair-wise distance between first and second 
+        """
+        second_grid, first_grid = np.meshgrid(second[second_coord_column].values, first[first_coord_column].values)
+        f = np.vectorize(self.getDistance)
+        distance_grid = f(first_grid, second_grid)
+        final_df = pd.DataFrame(data=distance_grid, index=first.index, columns=second.index)
+        return final_df
+        
+    @staticmethod
+    def getDistance(x_coord: tuple, y_coord: tuple):
+        return distance.geodesic(x_coord, y_coord).kilometers
+
+    @staticmethod
+    def _get_nearest_neighbor(distance_df:pd.DataFrame) -> dict:
+        """Get df containing the nearest neighbors whose distances are specified in distance_df
+        
+        Args:
+            distance_df (pd.DataFrame): distance_df[row, col] contains the distance in KM between the object described in row index and the object described in 
+            col index.
+        
+        Returns: 
+            dict: final_df containing the name of the nearest col for each row.
+        """ 
+        final_df = distance_df.idxmin(axis='columns')
+
+        with open(Path.config("nearest_station.yaml"),'w') as file:
+            yaml.dump(final_df.to_dict(), file)
+
+        return final_df.to_dict()
+    
+    def get_nearest_station(self, 
+                             well_location:str='well_location.csv', 
+                             station_location:str='station_location.csv') -> dict:
+        """Get nearest neighbor dictionary whose keys are wells and corresponding values the nearest stations.
+
+        Args:
+            well_location (str, optional): well_location csv containing lattitude and longitude of the wells. Defaults to 'well_location.csv'.
+            station_location (str, optional): station_location csv containing lattitude and longitude of the stations. Defaults to 'station_location.csv'.
+
+        Returns:
+            dict: nearest station dictionary 
+        """
+        self.init_label_data()
+        well_loc = self.get_well_location(well_location)
+        station_loc = self.get_station_location(station_location)
+        well_loc = well_loc.loc[self.all_labelled_wells]
+        distance_matrix = self.get_distance_matrix(well_loc, station_loc)
+        logger.info("Getting nearest well:station dict.")
+        return self._get_nearest_neighbor(distance_matrix)
 
     def init_processed_data(self):
         self.processed_data_dict = {"path": "ROC/PROCESSED_DATA", 
@@ -34,6 +180,11 @@ class S3ROCManager(S3Manager):
         if "DTSMIN" in self.processed_data_dict['args_ts'] and isinstance(self.processed_data_dict['args_ts'], list):
             self.processed_data_dict['args_ts'] = "DTSMIN"
 
+        logger.info(f"Initialising processed data S3 path: {self.processed_data_dict['path']}")
+        logger.info(f"Initialising processed data S3 file prefix: {self.processed_data_dict['file_prefix']}")
+        logger.info(f"Initialising processed data S3 file time stamp: {self.processed_data_dict['args_ts']}")
+        logger.info(f"Initialising processed data S3 file extension: {self.processed_data_dict['file_ext']}")
+
     def init_solar_data(self):
         self.solar_data_dict = {"path": "ROC/SOLAR_DATA", 
                                 "file_prefix": "SOLAR_DATA",
@@ -52,12 +203,33 @@ class S3ROCManager(S3Manager):
             if 'bucket' in self.info['solardata_kwargs']:
                 self.solar_data_dict["bucket"] = self.info['solardata_kwargs']["bucket"]
 
+        logger.info(f"Initialising solar data S3 path: {self.solar_data_dict['path']}")
+        logger.info(f"Initialising solar data S3 file prefix: {self.solar_data_dict['file_prefix']}")
+        logger.info(f"Initialising solar data S3 file time stamp: {self.solar_data_dict['args_ts']}")
+        logger.info(f"Initialising solar data S3 file extension: {self.solar_data_dict['file_ext']}")
+
     def read_solar(self,
                    station_code:str, 
                    start: datetime|str,
                    end: datetime|str,
                    strp_format:str='%Y-%m-%d',
-                   strf_format:str='%Y%m%d') -> pd.DataFrame:
+                   strf_format:str='%Y%m%d',
+                   to_csv:bool=False) -> pd.DataFrame:
+        """Read combined solar data from S3 database 
+
+        Args:
+            station_code (str): station code
+            start (datetime | str): start date
+            end (datetime | str): end date
+            strp_format (str, optional): interpretation format for start and end. Defaults to '%Y-%m-%d'.
+            strf_format (str, optional): S3 file storage date format. Defaults to '%Y%m%d'.
+            to_csv (bool, optional): whether to save solar data to dedicated local directory. Defaults to False.
+
+        Returns:
+            pd.DataFrame: combined solar data
+        """
+        
+        logger.info(f"Read solar file from database for station: {station_code} from {start} to {end}")
         alldf =  self.read_from_storage(item_cd=station_code, start=start, end = end,
                                       strp_format=strp_format, strf_format=strf_format,
                                       **self.solar_data_dict)
@@ -72,6 +244,9 @@ class S3ROCManager(S3Manager):
         alldf = alldf.reindex(date_range)
         alldf.index.name = "TS"
         alldf.reset_index(inplace=True)
+        if to_csv:
+            alldf.to_csv(Path.data(f"{station_code}_{start}_{end}_weather.csv"), index=False)
+            logger.info(f"Save solar data to {station_code}_{start}_{end}_weather.csv")
         return alldf
         
     def read_processed_data(self,
@@ -80,7 +255,24 @@ class S3ROCManager(S3Manager):
                    end: datetime|str,
                    strp_format:str='%Y-%m-%d',
                    strf_format:str='%Y%m%d',
-                   nan_replace_method:str='interpolate') -> pd.DataFrame:
+                   nan_replace_method:str='interpolate',
+                   to_csv:bool=False) -> pd.DataFrame:
+        """Read combined sensor data from S3 database 
+
+        Args:
+            well_code (str): well code
+            start (datetime | str): start date
+            end (datetime | str): end date
+            strp_format (str, optional): interpretation format for start and end. Defaults to '%Y-%m-%d'.
+            strf_format (str, optional): S3 file storage date format. Defaults to '%Y%m%d'.
+            nan_replace_method (str, optional): method to replace nan values. One of 'zero' or 'interpolate'. Defaults to 'interpolate'.
+            to_csv (bool, optional): whether to save solar data to dedicated local directory. Defaults to False.
+
+        Returns:
+            pd.DataFrame: combined raw data
+        """
+
+        logger.info(f"Read well data from database for well: {well_code} from {start} to {end}")
         alldf =  self.read_from_storage(item_cd=well_code, start=start, end = end,
                                       strp_format=strp_format, strf_format=strf_format,
                                       **self.processed_data_dict)
@@ -101,21 +293,142 @@ class S3ROCManager(S3Manager):
         alldf['Mask_PRESSURE_TH']=1-alldf.PRESSURE_TH.isna()
 
         if nan_replace_method == 'zero':
-            alldf.fillna(0)
+            alldf.fillna(0, inplace=True)
         elif nan_replace_method == 'interpolate':
             alldf.interpolate(method='linear', inplace=True, limit_direction='both')
         else:
-            print("Invalid nan_replace_method. Accepts either zero or interpolate.")
+            logger.error("Invalid nan_replace_method. Accepts either zero or interpolate.")
         alldf.index.name = "TS"
         alldf.reset_index(inplace=True)
+        if to_csv:
+            alldf.to_csv(Path.data(f"{well_code}_{start}_{end}_raw.csv"),index=False)
+            logger.info(f"Save well data to {well_code}_{start}_{end}_raw.csv")
         return alldf
     
-    def list_weather_stations(self):
+    def list_weather_stations(self) -> List:
+        """List all availabel weather stations from files on S3 storage
+
+        Returns:
+            List: list of all stations 
+        """
         all_data = self.list_files(self.solar_data_dict['path'])
         unique_stations = {x.split(self.solar_data_dict['path'])[1].split('_'+self.solar_data_dict['file_prefix'])[0] for x in all_data}
         return unique_stations
 
-    def list_all_wells(self):
+    def list_all_wells(self) -> List:
+        """List all wells whose csvs are available on the S3 storage 
+
+        Returns:
+            List: list of wells
+        """
         all_data = self.list_files(self.processed_data_dict['path'])
         unique_stations = {x.split(self.processed_data_dict['path'])[1].split('_'+self.processed_data_dict['file_prefix'])[0] for x in all_data}
         return unique_stations
+
+    def read_labelled_data(self,
+                   well_code:str, 
+                   start: datetime|str,
+                   end: datetime|str,
+                   strp_format:str='%Y-%m-%d',
+                   strf_format:str='%Y%m%d',
+                   nan_replace_method:str='interpolate',
+                   raw_csv:str|pd.DataFrame=None,
+                   weather_csv:str|pd.DataFrame=None,
+                   label_config:str='well_labels.yaml',
+                   window_size:int=6,
+                   to_pickle:bool=False) -> pd.DataFrame:
+        """Read and combine raw sensor, raw weather data, and labels.
+
+        Raw data are combined in a window -i.e. if window_size = 6,
+        for each TS, a ROC_VOLTAGE feature is a sequence of size 1440*7, containing 
+        ROC_VOLTAGE values from 6 previous days and the value of the current TS. 
+
+        Args:
+            well_code (str): well_code
+            start (datetime | str): start date
+            end (datetime | str): end_date
+            strp_format (str, optional): string format for start and end. Defaults to '%Y-%m-%d'.
+            strf_format (str, optional): string format for files on S3. Defaults to '%Y%m%d'.
+            nan_replace_method (str, optional): method to replace nan in raw data. One of 'interpolate','zero'. Defaults to 'interpolate'.
+            raw_csv (str | pd.DataFrame, optional): raw_df. If provided, will read raw_df from local storage. If None, will use read_processed_data to read from S3. Defaults to None.
+            weather_csv (str | pd.DataFrame, optional): weather df. If provided, will read weather_df from local storage. If None, will use read_solar to read from S3. Defaults to None.
+            label_config (str, optional): yaml file containing file labels. Defaults to 'well_labels.yaml'.
+            window_size (int, optional): window sequence length - determines the number of previous day to pool in forming feature. Defaults to 6.
+            to_pickle (bool, optional): whether to save data locally. Defaults to False.
+
+        Returns:
+            pd.DataFrame: labelled_df
+        """
+
+        logger.info(f"Calling read_labelled_data method for well: {well_code} from {start} to {end}")
+        #Prepare raw data df
+        if raw_csv is None:
+            raw_df = self.read_processed_data(well_code, start, end, strp_format, strf_format, nan_replace_method)
+            raw_df.set_index("TS",inplace=True)
+        else:
+            if isinstance(raw_csv, str):
+                raw_df = pd.read_csv(Path.data(raw_csv), index_col="TS", parse_dates=["TS"])
+            if isinstance(raw_csv, pd.DataFrame):
+                raw_df = raw_csv
+                if "TS" in raw_df.columns():
+                    raw_df.TS = pd.to_datetime(raw_df.TS)
+                    raw_df.set_index("TS",inplace=True)
+        daily_raw_df = raw_df.groupby(raw_df.index.date).agg(list)
+        daily_raw_df.index = pd.to_datetime(daily_raw_df.index)
+
+        #Prepare weather data df
+        if weather_csv is None:
+            weather_df = self.read_solar(self.nearest_station[well_code], start, end, strp_format, strf_format)
+            weather_df.set_index("TS",inplace=True)
+        else:
+            if isinstance(weather_csv, str):
+                weather_df = pd.read_csv(Path.data(weather_csv), index_col="TS", parse_dates=["TS"])
+            if isinstance(weather_csv, pd.DataFrame):
+                weather_df = weather_csv
+                if "TS" in weather_df.columns():
+                    weather_df.TS = pd.to_datetime(weather_df.TS)
+                    weather_df.set_index("TS",inplace=True)
+        daily_weather_df = weather_df.groupby(weather_df.index.date).agg(list)
+        daily_weather_df.index = pd.to_datetime(daily_weather_df.index)
+
+        #Prepare labels from label_config
+        with open(Path.config(label_config),'r') as file:
+            label = yaml.safe_load(file)[well_code]
+        
+        label_df = pd.DataFrame({"TS": label.keys(), "labels": label.values()})
+        label_df.set_index("TS",inplace=True)
+
+        #Closure to combine raw data and labels
+        def process(raw_df, weather_df, index, label, new_df, max_date = 4):
+            days = pd.date_range(index-timedelta(days=max_date),index)
+            try:
+                raw_window = raw_df.loc[days,:]
+                weather_window = weather_df.loc[days,:]
+            except Exception as e:
+                return 
+            new_df.loc[index,'labels']=label
+            for col in raw_df.columns:
+                new_df.loc[index,col] = np.hstack(raw_window[col].values).astype(object)
+                if len(new_df.loc[index,col]) < 1440 * (max_date+1): 
+                    logger.warning(f"Issue processing well {well_code}, incomplete feature length. Feature: {col}, size: {len(new_df.loc[index,col])}")
+                    new_df.drop(index)
+                    break
+            for col in weather_df.columns:
+                new_df.loc[index,col] = np.hstack(weather_window[col].values).astype(object)
+                if len(new_df.loc[index,col]) < 24 * (max_date+1): 
+                    logger.warning(f"Issue processing well {well_code}, incomplete feature length. Feature: {col}, size: {len(new_df.loc[index,col])}")
+                    new_df.drop(index)
+                    break
+
+        #Combine raw data and label by iterating through each label
+        logger.info(f"Combine raw data and labels for well: {well_code} from {start} to {end}")
+        cols = np.concatenate([raw_df.columns.values, label_df.columns.values, weather_df.columns.values])
+        new_df = pd.DataFrame(columns = cols)
+        for index in label_df.index:
+            label = label_df.loc[index,'labels']
+            process(daily_raw_df, daily_weather_df, index, label, new_df, window_size)
+        
+        if to_pickle:
+            new_df.to_pickle(Path.data(f"{well_code}_{start}_{end}_labelled.pkl"))
+            logger.info(f"Save labelled data to {well_code}_{start}_{end}_labelled.pkl")
+        return new_df

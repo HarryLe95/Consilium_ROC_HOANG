@@ -4,6 +4,10 @@ from datetime import datetime
 import pandas as pd
 from botocore.errorfactory import ClientError
 
+import logging 
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 class S3Manager(S3):
     """aa_utils wrapper that provides methods for looking up file hierarchy, list files from directory and downloading combined csv files
@@ -147,7 +151,7 @@ class S3Manager(S3):
         try:
             keys = [item['Key'] for item in response['Contents']]
         except Exception as e:
-            print(f"Query response doesn't contain Contents. Due to either invalid filepath: {prefix} or invalid file_prefix: {file_prefix}")
+            logger.error(f"Query response doesn't contain Contents. Due to either invalid filepath: {prefix} or invalid file_prefix: {file_prefix}")
             raise e
         while response['IsTruncated']:
             continuation_token = response['NextContinuationToken']
@@ -233,7 +237,7 @@ class S3Manager(S3):
             self.client.head_object(Bucket=bucket, Key=filepath)
             return True
         except ClientError as e:
-            print(f"Object {filepath} doesn't exists on the provided S3 Bucket.")
+            logging.warning(f"Object {filepath} doesn't exists on the provided S3 Bucket.")
             return False 
 
     def read_from_storage(self,

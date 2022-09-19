@@ -224,33 +224,5 @@ def get_combined_data(well_name: str|Sequence[str], features: Sequence[str]=['RO
                 TS = np.concatenate([TS, well_TS])
         return image, label, TS
     
-def create_label_dataframe(well_name:str, window_size:int = 6, save_pickle:bool=False):
-    df = pd.read_csv(Path.data(f"{well_name}_raw.csv"), index_col='TS', parse_dates = ['TS'])
-    daily_df = df.groupby(df.index.date).agg(list)
-    label_df = pd.read_pickle(Path.data(f"{well_name}_labelled.pkl"))
-    daily_df.index = pd.to_datetime(daily_df.index)
-    
-    def process(df, index, label, new_df, max_date = 4):
-        days = pd.date_range(index-timedelta(days=max_date),index)
-        try:
-            window = df.loc[days,:]
-        except Exception as e:
-            return 
-        new_df.loc[index,'labels']=label
-        for col in df.columns:
-            new_df.loc[index,col] = np.hstack(window[col].values).astype(object)
-        
-    new_df = pd.DataFrame(columns = label_df.columns)
-    for index in label_df.index:
-        label = label_df.loc[index,'labels']
-        process(daily_df, index, label, new_df, window_size)
-    new_df['series_length'] = new_df.ROC_VOLTAGE.apply(len)
-    sub_df = new_df[new_df.series_length!=1440*(window_size+1)]
-    if len(sub_df):
-        print(f"Well: {well_name}, incomplete data: {sub_df.labels.value_counts()}")
-        new_df.drop(index = sub_df.index,inplace=True)
-    if save_pickle:
-        new_df.to_pickle(Path.data(f"{well_name}_labelled.pkl"))
-    return new_df
     
     
