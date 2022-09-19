@@ -1,4 +1,6 @@
-from src.utils import Path, get_classifier, IoU
+from src.utils.PathManager import Paths as Path
+from src.utils.Metrics import IoU
+from src.utils.Model import get_classifier
 from sklearn.metrics import confusion_matrix, accuracy_score
 import tensorflow as tf 
 from typing import Sequence

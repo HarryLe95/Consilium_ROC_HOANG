@@ -38,7 +38,7 @@ def get_scaler(mode: str, well_type:str, config:dict, features:Sequence[str]) ->
         dict[StandardScaler]: dictionary of scaler for each feature of each well/well_group 
     """
     params = config[mode][well_type]
-    scaler_dict = {feature: get_scaler_from_config(params[feature]['mean'], params[feature]['var'], params[feature]['scale']) for feature in features}
+    scaler_dict = {feature: get_scaler_from_config(params[feature]['mean'], params[feature]['var'], params[feature]['scale']) for feature in features if "Mask" not in feature}
     return scaler_dict
 
 def get_scaled_images(df: pd.DataFrame, scaler: StandardScaler, features: Sequence[str], num_days:int=7) -> np.ndarray:
@@ -63,7 +63,8 @@ def get_scaled_images(df: pd.DataFrame, scaler: StandardScaler, features: Sequen
     for index, feature in enumerate(features):
         image = np.vstack(df[feature].values) #Convert a 1D np.ndarray of list to 2D np.ndarray
         shape = image.shape
-        image = scaler[feature].transform(image.reshape(-1,1)).reshape(shape)
+        if "Mask" not in feature:
+            image = scaler[feature].transform(image.reshape(-1,1)).reshape(shape)
         image = image[:,-1440*num_days:]
         if index == 0:
             all_image = image
@@ -88,38 +89,10 @@ def get_dataset_from_image_label(image: np.ndarray, label: np.ndarray, batch_siz
         return tf.data.Dataset.from_tensor_slices((image,image)).batch(batch_size)
     return tf.data.Dataset.from_tensor_slices((image,label)).batch(batch_size)
 
-def get_dataset(well:str, split_type:str='train', features:Sequence[str]=['ROC_VOLTAGE'], num_days:int= 7, 
-                scaler: StandardScaler=None, label_mapping:dict=None, drop_labels:Sequence[int]=None, batch_size:int=32, reconstruction:bool=False) -> tf.data.Dataset:
-    """Create a dataset with all preprocessing steps applied.
-
-    Preprocessing steps include: 
-    1/Reading in a predetermined dataset split 
-    2/Normalise the features
-    3/Concatenate features so each instance is a sequence of num_days days
-    4/Relabel data based on label_mapping 
-    5/Remove data with labels in drop_labels
-    6/Create a dataset object with batch_size
-    
-    Args:
-        well (str): well name
-        split_type (str, optional): can be 'train', 'val', None. If 'train' or 'val' is provided, Defaults to 'train'.
-        features (Sequence[str], optional): _description_. Defaults to ['ROC_VOLTAGE'].
-        num_days (int, optional): number of consecutive days to be include in the transformed sequence. Defaults to 7.
-        scaler (StandardScaler, optional): data scaler. Defaults to None.
-        label_mapping (dict, optional): dictionary specifying relabelling rules. Defaults to None - no relabelling.
-        drop_labels (Sequence[int], optional): list of labels to be dropped from the dataset. Defaults to None.
-        batch_size (int, optional): batch_size. Defaults to 32.
-        reconstruction (bool, optional): whether to create a dataset from non-positive class for model pretraining. Defaults to False.
-
-    Returns:
-        tf.data.Dataset: output dataset
-    """
-    image, label,_ = get_manual_split_data(well, features, num_days, split_type, scaler, label_mapping, drop_labels)
-    return get_dataset_from_image_label(image, label, batch_size, reconstruction)
-
-def get_manual_split_data(well_name: str, features: Sequence[str]=['ROC_VOLTAGE'], num_days:int=7,
-                          split_type:str=None, scaler:StandardScaler=None, label_mapping: dict=None, drop_labels: Sequence[int]=None) -> tuple[np.ndarray,np.ndarray, np.ndarray]:
-    """Create an image label pair with all preprocessing steps applied.
+def get_dataset_image_label(well_name: str, features: Sequence[str]=['ROC_VOLTAGE'], num_days:int=7,
+                          file_post_fix:str="2016-01-01_2023-01-01_labelled", file_ext:str='pkl',
+                          scaler:StandardScaler=None, label_mapping: dict=None, drop_labels: Sequence[int]=None) -> tuple[np.ndarray,np.ndarray, np.ndarray]:
+    """Create an image label TS triplet with all preprocessing steps applied.
 
     Preprocessing steps include: 
     1/Reading in a predetermined dataset split 
@@ -130,9 +103,10 @@ def get_manual_split_data(well_name: str, features: Sequence[str]=['ROC_VOLTAGE'
     
     Args:
         well (str): well name
-        split_type (str, optional): can be 'train', 'val', None. If 'train' or 'val' is provided, Defaults to 'train'.
         features (Sequence[str], optional): _description_. Defaults to ['ROC_VOLTAGE'].
         num_days (int, optional): number of consecutive days to be include in the transformed sequence. Defaults to 7.
+        file_post_fix (str, optional): post-fix file name. Defaults to "2016-01-01_2023-01-01_labelled".
+        file_ext (str, optional): labelled data file extension. Defaults to pkl
         scaler (StandardScaler, optional): data scaler. Defaults to None.
         label_mapping (dict, optional): dictionary specifying relabelling rules. Defaults to None - no relabelling.
         drop_labels (Sequence[int], optional): list of labels to be dropped from the dataset. Defaults to None.
@@ -141,9 +115,10 @@ def get_manual_split_data(well_name: str, features: Sequence[str]=['ROC_VOLTAGE'
         tuple[np.ndarray,np.ndarray, np.ndarray]: output data, label, timestamp tuple
     """
     #Load dataset
-    df_path = Path.data(f"{well_name}_labelled_{split_type}.pkl") if split_type is not None else Path.data(f"{well_name}_labelled.pkl") 
-    df = pd.read_pickle(df_path)
-
+    if file_ext =="pkl":
+        df = pd.read_pickle(Path.data(f"{well_name}_{file_post_fix}.{file_ext}"))
+    elif file_ext == "csv":
+        df = pd.read_csv(Path.data(f"{well_name}_{file_post_fix}.{file_ext}"), index_col="TS", parse_dates=["TS"])
 
     #Map labels
     if drop_labels:
@@ -167,7 +142,7 @@ def get_manual_split_data(well_name: str, features: Sequence[str]=['ROC_VOLTAGE'
 
 def get_random_split_from_image_label(image: np.ndarray, label: np.ndarray, TS: np.ndarray,
                                       train_ratio:float=0.8) -> tuple[np.ndarray]:
-    """Split to training and validat sets from a pair of image label
+    """Split to training and validat sets from a triplet of image label TS
 
     Args:
         image (np.ndarray): image
@@ -207,13 +182,14 @@ def get_combined_data(well_name: str|Sequence[str], features: Sequence[str]=['RO
     """
     #Dataset comprises of 1 well
     if isinstance(well_name,str):
-        return get_manual_split_data(well_name, features, num_days, None, scaler, label_mapping, drop_labels)
+        return get_dataset_image_label(well_name=well_name, features=features, num_days=num_days, scaler=scaler, label_mapping=label_mapping, drop_labels=drop_labels)
     #Dataset comprises of multiple wells
     if hasattr(well_name,'__iter__') and not isinstance(well_name,str):
         assert type(scaler)== type(well_name)
         assert len(scaler) == len(well_name)
         for index in range(len(well_name)):
-            well_image, well_label, well_TS = get_manual_split_data(well_name[index], features, num_days, None,scaler[index], label_mapping,drop_labels)
+            well_image, well_label, well_TS = get_dataset_image_label(well_name=well_name[index], features=features, num_days=num_days, 
+                                                                      scaler=scaler[index], label_mapping=label_mapping, drop_labels=drop_labels)
             if index == 0:
                 image = well_image
                 label = well_label

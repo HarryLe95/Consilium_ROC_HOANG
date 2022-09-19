@@ -1,4 +1,4 @@
-from src.utils import logger_init, get_argparse
+from src.utils.Setup import logger_init, get_argparse
 from src.ROC_Classifier.Trainer import ROC_Classifier
 from src.ROC_Classifier.DataGenerator import ROC_Generator
 from copy import deepcopy 

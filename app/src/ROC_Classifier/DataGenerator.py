@@ -1,4 +1,5 @@
-from src.utils import Path, get_dataset_from_image_label, get_combined_data, get_scaler, get_random_split_from_image_label
+from src.utils.PathManager import Paths as Path 
+from src.utils.Data import get_dataset_from_image_label, get_combined_data, get_scaler, get_random_split_from_image_label
 from typing import Sequence 
 import yaml 
 import tensorflow as tf 
