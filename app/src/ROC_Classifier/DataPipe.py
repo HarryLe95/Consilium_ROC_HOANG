@@ -407,19 +407,23 @@ class S3ROCManager(S3Manager):
             except Exception as e:
                 return 
             new_df.loc[index,'labels']=label
-            for col in raw_df.columns:
-                new_df.loc[index,col] = np.hstack(raw_window[col].values).astype(object)
-                if len(new_df.loc[index,col]) < 1440 * (max_date+1): 
-                    logger.warning(f"Issue processing well {well_code}, incomplete feature length. Feature: {col}, size: {len(new_df.loc[index,col])}")
-                    new_df.drop(index)
-                    break
-            for col in weather_df.columns:
-                new_df.loc[index,col] = np.hstack(weather_window[col].values).astype(object)
-                if len(new_df.loc[index,col]) < 24 * (max_date+1): 
-                    logger.warning(f"Issue processing well {well_code}, incomplete feature length. Feature: {col}, size: {len(new_df.loc[index,col])}")
-                    new_df.drop(index)
-                    break
+            drop_index = False 
 
+            for col in raw_df.columns:
+                column_val = np.hstack(raw_window[col].values).astype(object)
+                if len(column_val) < 1440 * (max_date+1): 
+                    logger.warning(f"Issue processing well {well_code}, time-index: {index} incomplete feature length. Feature: {col}, size: {len(column_val)}")
+                    drop_index=True
+                new_df.loc[index,col]=column_val
+
+            for col in weather_df.columns:
+                column_val = np.hstack(weather_window[col].values).astype(object)
+                if len(column_val) < 24 * (max_date+1): 
+                    logger.warning(f"Issue processing well {well_code}, time-index: {index} incomplete feature length. Feature: {col}, size: {len(new_df.loc[index,col])}")
+                    drop_index=True
+                new_df.loc[index,col]=column_val
+            if drop_index:
+                new_df.drop(index, inplace=True)
         #Combine raw data and label by iterating through each label
         logger.info(f"Combine raw data and labels for well: {well_code} from {start} to {end}")
         cols = np.concatenate([raw_df.columns.values, label_df.columns.values, weather_df.columns.values])

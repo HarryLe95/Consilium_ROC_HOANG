@@ -87,7 +87,10 @@ def get_dataset_from_image_label(image: np.ndarray, label: np.ndarray, batch_siz
     if reconstruction:
         image = image[label==0]
         return tf.data.Dataset.from_tensor_slices((image,image)).batch(batch_size)
-    return tf.data.Dataset.from_tensor_slices((image,label)).batch(batch_size)
+    image = image.astype('float32')
+    label = label.astype('float32')
+    dataset= tf.data.Dataset.from_tensor_slices((image,label)).batch(batch_size)
+    return dataset
 
 def get_dataset_image_label(well_name: str, features: Sequence[str]=['ROC_VOLTAGE'], num_days:int=7,
                           file_post_fix:str="2016-01-01_2023-01-01_labelled", file_ext:str='pkl',

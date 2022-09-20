@@ -168,3 +168,4 @@ viz/
 #Private Info
 RDP.sh
 **rdp-key**
+launch.json
