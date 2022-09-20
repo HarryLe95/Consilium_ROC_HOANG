@@ -1,13 +1,16 @@
-from src.aau.S3Manager import S3Manager
-from src.utils.PathManager import Paths as Path
 import logging 
-from datetime import datetime as datetime
-from datetime import timedelta 
+from   typing   import List 
+from   datetime import timedelta 
+from   datetime import datetime as datetime
+
 import pandas as pd 
 import numpy as np 
 import yaml
 from geopy import distance 
-from typing import List 
+
+from src.aau.S3Manager import S3Manager
+from src.utils.PathManager import Paths as Path
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
@@ -41,6 +44,20 @@ class S3ROCManager(S3Manager):
     def init_label_data(self):
         with open(Path.config("well_labels.yaml"),'r') as file:
             self.label_dict = yaml.safe_load(file)
+
+    def get_well_label_count(self):
+        self.init_label_data()
+        
+        def get_label_count(x):
+            value = list(x)
+            count = {i:0 for i in range(10)}
+            label, label_count = np.unique(value, return_counts=True)
+            for i,l in enumerate(label):
+                count[l] = label_count[i]
+            return count 
+        count_dict = {well:get_label_count(self.label_dict[well].values()) for well in self.label_dict}
+        self.well_label_count = pd.DataFrame(count_dict).T
+
 
     @staticmethod
     def process_well_location(file:str='well_location.csv'):

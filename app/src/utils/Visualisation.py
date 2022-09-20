@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd 
 from datetime import timedelta 
 
-label_colour_dict = {0:'gold',
+colour_dict = {0:'gold',
                1:'orchid',
                2:'navy',
                3:'salmon',
@@ -13,10 +13,10 @@ label_colour_dict = {0:'gold',
                8:'mediumvioletred',
                9:'aqua'}
 
-weather_colour_dict ={
+weather_color_dict ={
     "cloudcover":'red',
     "cloudcover_low":'blue',
-    "cloudcover_mid":'white',
+    "cloudcover_mid":'orange',
     "cloudcover_high":'brown',
     "shortwave_radiation":'black',
     "direct_radiation":'purple',
@@ -27,7 +27,7 @@ weather_colour_dict ={
 def plot_label(ax: plt.axes, label:pd.Series|pd.DataFrame, start:str=None, end:str=None):
     #Slice dataframe based on start and end 
     if isinstance(label, pd.DataFrame):
-        label = label.labels
+        label_df = label.labels
     if start is None and end is None:
         label_df = label
     elif start is None and end is not None:
@@ -41,7 +41,7 @@ def plot_label(ax: plt.axes, label:pd.Series|pd.DataFrame, start:str=None, end:s
     for i in range(len(label_df)):
         x_start = label_df.index[i]
         x_end = x_start + timedelta(days=1)
-        colour = label_colour_dict[label_df[i]]
+        colour = colour_dict[label_df[i]]
         ax.axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
         
 def plot_data(ax: plt.Axes, 
@@ -69,7 +69,7 @@ def plot_ROC(raw_df, well_name, weather_df=None, label_df=None, start=None, end=
                     raw_features:list=["ROC_VOLTAGE","FLOW","PRESSURE_TH"],
                     weather_features:list = ["cloudcover", "cloudcover_low", "cloudcover_mid", "cloudcover_high",
                     "shortwave_radiation", "direct_radiation","diffuse_radiation","direct_normal_irradiance"],
-                    label_colour_dict:dict = label_colour_dict, weather_colour_dict:dict = weather_colour_dict):
+                    ylim:dict = {"ROC_VOLTAGE":[25, 30]}):
 
     fig, ax = plt.subplots(len(raw_features), figsize=(50,35), sharex=True)
     for idx, feature in enumerate(raw_features):
@@ -90,18 +90,15 @@ def plot_ROC(raw_df, well_name, weather_df=None, label_df=None, start=None, end=
         if weather_df is not None:
             for weather_feature in weather_features:
                 if "cloud" in weather_feature:
-                    plot_data(cloud_axis, weather_df[weather_feature], start, end, color=weather_colour_dict[weather_feature],size=30, marker="X")
+                    plot_data(cloud_axis, weather_df[weather_feature], start, end, color=weather_color_dict[weather_feature],size=30, marker="X")
                 if "rad" in weather_feature:
-                    plot_data(radiation_axis, weather_df[weather_feature], start, end, color=weather_colour_dict[weather_feature],size=30, marker="D")
+                    plot_data(radiation_axis, weather_df[weather_feature], start, end, color=weather_color_dict[weather_feature],size=30, marker="D")
+        if feature in ylim:
+            ax[idx].set_ylim(ylim[feature])
         ax[idx].set_ylabel(feature, size=20)
         ax[idx].legend(loc='upper left', prop={'size': 15})
         cloud_axis.legend(loc='upper right', prop={'size': 15})
         radiation_axis.legend(loc='lower left', prop={'size': 15})
-
-    handleList = [plt.plot([], marker="o", ls="", color=color)[0] for color in label_colour_dict.values()]
-    legend = plt.legend(handleList, label_colour_dict.keys(), loc='right', prop={'size': 25})
-    legend.get_frame().set_alpha(None)
-    legend.get_frame().set_facecolor((0, 0, 1, 0.1))
         
     fig.suptitle(f'{well_name}',fontsize=96)
     plt.xlabel("TS")
