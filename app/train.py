@@ -10,23 +10,41 @@ def main():
     for well in args.test_wells:
         args.train_wells.remove(well)
     args.num_classes = len(np.unique(np.array(list(args.label_mapping.values()))))
-    args.num_features = args.num_days*len(args.features)
-    
+   
     #Init Logger and save folder
     logger_init(args)
     
-    data_generator = ROC_Generator(args.train_wells, features=args.features, num_days = args.num_days, normalise_mode=args.normalise_mode,
+    data_generator = ROC_Generator(wells=args.train_wells, features=args.features, num_days = args.num_days, normalise_mode=args.normalise_mode,
                                     label_mapping=args.label_mapping, drop_labels = args.drop_labels,
-                                    split=True, split_ratio=0.8, batch_size=args.batch_size, num_classes=args.num_classes)
+                                    split=True, split_ratio=0.8, num_classes=args.num_classes,
+                                    last_day=args.last_day)
     
     data_generator.setup()
-    train_dataset, val_dataset = data_generator.dataset
-    trainer = ROC_Classifier(args.num_classes, num_features=args.num_features, optimiser=args.optimiser, base_lr=args.base_lr, early_stopping_patience=args.early_stopping_patience,
+
+    test_generator = ROC_Generator(wells=args.test_wells, features=args.features, num_days = args.num_days, normalise_mode=args.normalise_mode,
+                                    label_mapping=args.label_mapping, drop_labels = args.drop_labels,
+                                    num_classes=args.num_classes, last_day = args.last_day)
+    
+    test_generator.setup()
+
+    args.num_well_features = args.num_days*len(data_generator.well_features)
+    args.num_weather_features = args.num_days*len(data_generator.weather_features) if data_generator.weather_features is not None else 0 
+
+    trainer = ROC_Classifier(num_classes=args.num_classes, 
+                             num_well_features=args.num_well_features, 
+                             num_weather_features=args.num_weather_features,
+                             optimiser=args.optimiser, base_lr=args.base_lr, early_stopping_patience=args.early_stopping_patience,
                              reduce_lr_patience=args.reduce_lr_patience, num_epochs = args.num_epochs, metrics = args.metrics, use_pretrain=args.use_pretrain,
                              pretrain_model=args.pretrain_model, save_model=args.save_model, save_name=args.save_name)
     trainer.setup()
-    history = trainer.fit(train_dataset, val_dataset)
-    trainer.evaluate_binary(val_dataset, data_generator.TS[1])
+    
+    history = trainer.fit(x = data_generator.train_image, 
+                          y = data_generator.train_label, 
+                          validation_data=(data_generator.val_image, data_generator.val_label),
+                          batch_size = args.batch_size)
+
+    trainer.evaluate_binary(data_generator.val_image, data_generator.val_label, data_generator.TS[1])
+    trainer.evaluate_binary(test_generator.image, test_generator.label, test_generator.TS)
     
 if __name__ == "__main__":
     main()

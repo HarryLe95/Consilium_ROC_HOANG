@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 class ROC_Classifier:
     def __init__(self, 
                  num_classes: int = 2,
-                 num_features: int = 1440,
+                 num_well_features: int = 1440,
+                 num_weather_features:int = 0,
                  optimiser:str='adam',
                  base_lr:float=1e-3,
                  early_stopping_patience:int=10,
@@ -25,7 +26,8 @@ class ROC_Classifier:
                  save_model:bool=False,
                  save_name:str=None):
         self.num_classes = num_classes
-        self.num_features = num_features 
+        self.num_well_features = num_well_features 
+        self.num_weather_features = num_weather_features
         self.opt = optimiser
         self.base_lr = base_lr 
         self.early_stopping_patience = early_stopping_patience
@@ -55,7 +57,7 @@ class ROC_Classifier:
             else:
                 return tf.keras.model.load_model(Path.model(self.pretrain_model))
         logger.debug(f"Loading random init model.")
-        return get_classifier(self.num_classes, self.num_features)
+        return get_classifier(self.num_classes, self.num_well_features, self.num_weather_features)
     
     def get_metrics(self):
         metrics = []
@@ -93,35 +95,33 @@ class ROC_Classifier:
                   metrics=self.metrics)
         logger.debug("Compile model.")
         
-    def fit(self, train_dataset: tf.data.Dataset, val_dataset: tf.data.Dataset):
+    def fit(self, x, y, validation_data, batch_size):
         logger.debug("Fit to training and validation dataset.")
-        history = self.model.fit(train_dataset, validation_data= val_dataset, callbacks = self.callbacks, epochs = self.num_epochs)
+        history = self.model.fit(x=x,y=y, 
+                    validation_data= validation_data, 
+                    batch_size = batch_size,
+                    callbacks = self.callbacks, epochs = self.num_epochs)
         
         if self.save_model:
             self.model.save(Path.model("model",self.save_name))
             logger.debug(f"Save trained model to {self.save_name}")
         return history 
     
-    def predict(self, test_dataset: tf.data.Dataset|np.ndarray): 
+    def predict(self, test_image: tf.data.Dataset|np.ndarray): 
         logger.debug("Getting model's prediction on test dataset")
-        predictions = self.model.predict(test_dataset)
+        predictions = self.model.predict(test_image)
         return predictions 
     
-    def _predict(self, test_dataset: tf.data.Dataset|np.ndarray): 
-        for i,(img,label) in enumerate(test_dataset):
-            pred = self.model.predict(img)
-            if i == 0:
-                y_true = label
-                y_pred = pred
-            else:
-                y_true = np.concatenate([y_true, label])
-                y_pred = np.concatenate([y_pred, pred])
+    def _predict(self, test_image: tf.data.Dataset|np.ndarray, test_label:np.ndarray): 
+        y_pred = self.predict(test_image)
         y_pred = np.argmax(y_pred, axis=-1)
-        y_true = np.argmax(y_true, axis=-1)
+        y_true = np.argmax(test_label, axis=-1)
         return y_true, y_pred
     
-    def evaluate_binary(self, test_dataset: tf.data.Dataset|np.ndarray, TS:np.ndarray):
-        y_true, y_pred = self._predict(test_dataset)
+    def evaluate_binary(self, test_image: tf.data.Dataset|np.ndarray, 
+                        test_label:np.ndarray, 
+                        TS:np.ndarray):
+        y_true, y_pred = self._predict(test_image, test_label)
         cm = confusion_matrix(y_true, y_pred, normalize='true')
         mask = y_true != y_pred 
         mismatch = TS[mask]

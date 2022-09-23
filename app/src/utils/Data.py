@@ -6,42 +6,14 @@ import tensorflow as tf
 import numpy as np
 from typing import Sequence
 from src.utils.PathManager import Paths as Path
-from datetime import timedelta
+from datetime import timedelta, datetime
 
-def get_scaler_from_config(mean: float|Sequence[float],var: float|Sequence[float],scale: float|Sequence[float]) -> StandardScaler:
-    """Create a Standard Scaler object from known data statistics
-
-    Args:
-        mean (float | Sequence[float]): data mean
-        var (float | Sequence[float]):  data variance
-        scale (float | Sequence[float]):data scale
-
-    Returns:
-        StandardScaler: scaler object 
-    """
-    scaler = StandardScaler()
-    scaler.mean_ = mean
-    scaler.var_ = var
-    scaler.scale_= scale
-    return scaler
     
-def get_scaler(mode: str, well_type:str, config:dict, features:Sequence[str]) -> dict[StandardScaler]:
-    """Get a dictionary of StandardScaler objects that correspond to statistics specified in config 
-
-    Args:
-        mode (str): either one or all. If one is selected, a scaler is specified for every individual well. If all is selected, a scaler is specified for each well group (12V or 24V)
-        well_type (str): if one is selected, well_type is individual well's name. Otherwise, well_type specifies the well group 
-        config (dict): config file with known data statistics
-        features (Sequence[str]): which features are to be scaled. Example: ["ROC_VOLTAGE", "FLOW"]
-
-    Returns:
-        dict[StandardScaler]: dictionary of scaler for each feature of each well/well_group 
-    """
-    params = config[mode][well_type]
-    scaler_dict = {feature: get_scaler_from_config(params[feature]['mean'], params[feature]['var'], params[feature]['scale']) for feature in features if "Mask" not in feature}
-    return scaler_dict
-
-def get_scaled_images(df: pd.DataFrame, scaler: StandardScaler, features: Sequence[str], num_days:int=7) -> np.ndarray:
+def get_scaled_images(df: pd.DataFrame, 
+                      scaler: StandardScaler, 
+                      features: Sequence[str], 
+                      num_days:int=7,
+                      sequence_len:int=1440) -> np.ndarray:
     """Scale and transform features of an input dataframe using input scaler
 
     Each row in the dataframe corresponds to data collected for the full day, which can be a sequence of recordings 
@@ -56,46 +28,31 @@ def get_scaled_images(df: pd.DataFrame, scaler: StandardScaler, features: Sequen
         scaler (StandardScaler): scaler 
         features (Sequence[str]): columns/features to be transformed.
         num_days (int, optional): number of consecutive days to be include in the transformed sequence. Defaults to 7.
-
+        sequence_len(int, optional): length of a one day sequence. One of 1440 (well_features) or 24 (weather). Defaults to 1440 for well features.
     Returns:
         np.ndarray: scaled and transformed image.
     """
     for index, feature in enumerate(features):
         image = np.vstack(df[feature].values) #Convert a 1D np.ndarray of list to 2D np.ndarray
         shape = image.shape
-        if "Mask" not in feature:
-            image = scaler[feature].transform(image.reshape(-1,1)).reshape(shape)
-        image = image[:,-1440*num_days:]
+        if scaler is not None:
+            if "Mask" not in feature:
+                image = scaler[feature].transform(image.reshape(-1,1)).reshape(shape)
+        image = image[:,-sequence_len*num_days:]
         if index == 0:
             all_image = image
         else:
             all_image = np.concatenate([all_image, image],axis=1)
     return all_image
     
-def get_dataset_from_image_label(image: np.ndarray, label: np.ndarray, batch_size:int = 32, reconstruction:bool=False) -> tf.data.Dataset:
-    """Create a dataset wrapper from an (image, label) pair for model training/testing
-
-    Args:
-        image (np.ndarray): data 
-        label (np.ndarray): label
-        batch_size (int, optional): batch_size. Defaults to 32.
-        reconstruction (bool, optional): whether to create a dataset from non-positive class for model pretraining. Defaults to False.
-
-    Returns:
-        tf.data.Dataset: dataset wrapper
-    """
-    if reconstruction:
-        image = image[label==0]
-        return tf.data.Dataset.from_tensor_slices((image,image)).batch(batch_size)
-    image = image.astype('float32')
-    label = label.astype('float32')
-    dataset= tf.data.Dataset.from_tensor_slices((image,label)).batch(batch_size)
-    return dataset
-
-def get_dataset_image_label(well_name: str, features: Sequence[str]=['ROC_VOLTAGE'], num_days:int=7,
+def get_dataset_image_label(well_name: str, 
+                          well_features: Sequence[str]=['ROC_VOLTAGE'], 
+                          weather_features: Sequence[str] = None,
+                          num_days:int=7,
                           file_post_fix:str="2016-01-01_2023-01-01_labelled", file_ext:str='pkl',
-                          scaler:StandardScaler=None, label_mapping: dict=None, drop_labels: Sequence[int]=None) -> tuple[np.ndarray,np.ndarray, np.ndarray]:
-    """Create an image label TS triplet with all preprocessing steps applied.
+                          scaler:StandardScaler=None, label_mapping: dict=None, drop_labels: Sequence[int]=None,
+                          last_day:str|datetime=None) -> tuple[np.ndarray,np.ndarray, np.ndarray]:
+    """Create an image_well image_weather label TS tuple with all preprocessing steps applied.
 
     Preprocessing steps include: 
     1/Reading in a predetermined dataset split 
@@ -106,7 +63,8 @@ def get_dataset_image_label(well_name: str, features: Sequence[str]=['ROC_VOLTAG
     
     Args:
         well (str): well name
-        features (Sequence[str], optional): _description_. Defaults to ['ROC_VOLTAGE'].
+        well_features (Sequence[str], optional): well features. Defaults to ['ROC_VOLTAGE'].
+        weather_features (Sequence[str], optional): weather features. Defaults to None.
         num_days (int, optional): number of consecutive days to be include in the transformed sequence. Defaults to 7.
         file_post_fix (str, optional): post-fix file name. Defaults to "2016-01-01_2023-01-01_labelled".
         file_ext (str, optional): labelled data file extension. Defaults to pkl
@@ -115,13 +73,18 @@ def get_dataset_image_label(well_name: str, features: Sequence[str]=['ROC_VOLTAG
         drop_labels (Sequence[int], optional): list of labels to be dropped from the dataset. Defaults to None.
 
     Returns:
-        tuple[np.ndarray,np.ndarray, np.ndarray]: output data, label, timestamp tuple
+        tuple[np.ndarray,np.ndarray, np.ndarray]: image_well, image_weather, label, timestamp tuple
     """
     #Load dataset
     if file_ext =="pkl":
         df = pd.read_pickle(Path.data(f"{well_name}_{file_post_fix}.{file_ext}"))
     elif file_ext == "csv":
         df = pd.read_csv(Path.data(f"{well_name}_{file_post_fix}.{file_ext}"), index_col="TS", parse_dates=["TS"])
+    
+    if last_day is not None:
+        if isinstance(last_day,str):
+            last_day = datetime.strptime(last_day,'%Y-%m-%d')
+        df = df.loc[:last_day,:]
 
     #Map labels
     if drop_labels:
@@ -129,79 +92,101 @@ def get_dataset_image_label(well_name: str, features: Sequence[str]=['ROC_VOLTAG
     if label_mapping:
         df = df.replace({"labels":label_mapping})
     #Transform
-    if scaler:
-        all_image = get_scaled_images(df,scaler,features,num_days)
-    else:
-        for index, feature in enumerate(features):
-            image = np.vstack(df[feature].values)
-            image = image[:,-1440*num_days:]
-            if index == 0:
-                all_image = image
-            else: 
-                all_image = np.concatenate([all_image, image],axis=1)
+    all_well_image = get_scaled_images(df,scaler,well_features,num_days)
+    all_weather_image = get_scaled_images(df,scaler,weather_features,num_days,24) \
+                        if weather_features is not None else None
+
     label = df.labels.values
     TS = df.index.to_numpy()
-    return all_image, label, TS 
+    # all_image = (all_well_image, all_weather_image) if all_weather_image is not None else all_well_image
+    return all_well_image, all_weather_image, label, TS 
 
-def get_random_split_from_image_label(image: np.ndarray, label: np.ndarray, TS: np.ndarray,
+def get_random_split_from_image_label(image_well: np.ndarray, 
+                                      image_weather:np.ndarray,
+                                      label: np.ndarray, TS: np.ndarray,
                                       train_ratio:float=0.8) -> tuple[np.ndarray]:
-    """Split to training and validat sets from a triplet of image label TS
+    """Split to training and validat sets from a tuple of image_well, image_weather, label TS
 
     Args:
-        image (np.ndarray): image
+        image_well (np.ndarray): image_well
+        image_weather (np.ndarray): image_weather
         label (np.ndarray): label
         TS (np.ndarray): timestamp
         train_ratio (float, optional): fractional of original data to be used for training. Defaults to 0.8.
 
     Returns:
-        tuple[np.ndarray]: tuple of two pairs of image/label/timestamp for training and validation sets
+        tuple[np.ndarray]: tuple of two pairs of image_wells/image_weather/label/timestamp for training and validation sets
     """
-    index = np.arange(len(image))
+    index = np.arange(len(image_well))
     np.random.shuffle(index)
     train_index = index[:int(len(index)*train_ratio)]
     val_index = index[int(len(index)*train_ratio):]
-    train_image = image[train_index,:]
+    train_image_well = image_well[train_index,:]
+    train_image_weather = image_weather[train_index,:] if image_weather is not None else None 
     train_label = label[train_index,:]
     train_TS = TS[train_index]
-    val_image = image[val_index,:]
+    val_image_well = image_well[val_index,:]
+    val_image_weather = image_weather[val_index,:] if image_weather is not None else None
     val_label = label[val_index,:]
     val_TS = TS[val_index]
-    return train_image, train_label, train_TS, val_image, val_label, val_TS
+    return train_image_well, train_image_weather, train_label, train_TS, val_image_well, val_image_weather, val_label, val_TS
     
-def get_combined_data(well_name: str|Sequence[str], features: Sequence[str]=['ROC_VOLTAGE'], 
-                      num_days:int=7, scaler:StandardScaler=None, label_mapping:dict=None, drop_labels:Sequence[int]=None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Create an image label TS triplet with all preprocessing steps applied from one well or from a group of wells
+def get_combined_data(well_name: str|Sequence[str], 
+                      well_features: Sequence[str]=['ROC_VOLTAGE'],
+                      weather_features: Sequence[str]=None, 
+                      num_days:int=7, scaler:StandardScaler=None, 
+                      label_mapping:dict=None, 
+                      drop_labels:Sequence[int]=None,
+                      last_day:str|datetime=None,
+                      ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create an image_well, image_weather, label TS tuple with all preprocessing steps applied 
+    from one well or from a group of wells
 
     Args:
         well_name (str | Sequence[str]): if str - name of one well, if list - name of a set of wells to be combined. 
-        features (Sequence[str], optional): data features. Defaults to ['ROC_VOLTAGE'].
+        well_features (Sequence[str], optional): well features. Defaults to ['ROC_VOLTAGE'].
+        weather_features (Sequence[str], optional): weather features. Defaults to None.
         num_days (int, optional): number of days to form data sequence. Defaults to 7.
         scaler (StandardScaler, optional): scaler. Defaults to None.
         label_mapping (dict, optional): dictionary specifying the relabelling rules. Defaults to None.
         drop_labels (Sequence[int], optional): list of labels to be dropped from dataset. Defaults to None.
 
     Returns:
-        tuple[np.ndarray, np.ndarray, np.ndarray]: image, label, TS triplet of the dataset
+        tuple[np.ndarray, np.ndarray, np.ndarray]: image_well, image_weather, label, TS tuple of the dataset
     """
     #Dataset comprises of 1 well
     if isinstance(well_name,str):
-        return get_dataset_image_label(well_name=well_name, features=features, num_days=num_days, scaler=scaler, label_mapping=label_mapping, drop_labels=drop_labels)
+        return get_dataset_image_label(well_name=well_name, 
+                                       well_features=well_features,
+                                       weather_features=weather_features, 
+                                       num_days=num_days, scaler=scaler, 
+                                       label_mapping=label_mapping, 
+                                       drop_labels=drop_labels,
+                                       last_day=last_day)
     #Dataset comprises of multiple wells
     if hasattr(well_name,'__iter__') and not isinstance(well_name,str):
         assert type(scaler)== type(well_name)
         assert len(scaler) == len(well_name)
         for index in range(len(well_name)):
-            well_image, well_label, well_TS = get_dataset_image_label(well_name=well_name[index], features=features, num_days=num_days, 
-                                                                      scaler=scaler[index], label_mapping=label_mapping, drop_labels=drop_labels)
+            well_image, weather_image, well_label, well_TS = get_dataset_image_label(well_name=well_name[index], 
+                                                                      well_features=well_features, 
+                                                                      weather_features=weather_features,
+                                                                      num_days=num_days, 
+                                                                      scaler=scaler[index], 
+                                                                      label_mapping=label_mapping, 
+                                                                      drop_labels=drop_labels,
+                                                                      last_day=last_day)
             if index == 0:
-                image = well_image
+                image_well = well_image
+                image_weather = weather_image if weather_features is not None else None 
                 label = well_label
                 TS = well_TS
             else:
-                image = np.concatenate([image, well_image],axis=0)
+                image_well = np.concatenate([image_well, well_image],axis=0)
+                image_weather = np.concatenate([image_weather, weather_image],axis=0) if weather_features is not None else None 
                 label = np.concatenate([label, well_label],axis=0)
                 TS = np.concatenate([TS, well_TS])
-        return image, label, TS
+        return image_well, image_weather, label, TS
     
     
     
