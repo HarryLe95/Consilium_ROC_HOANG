@@ -36,8 +36,8 @@ def get_classifier(num_classes: int, num_well_features: int, num_weather_feature
     if num_weather_features != 0:
         well_model = BaseClassifier(num_well_features)
         weather_model = BaseClassifier(num_weather_features)
-        well_inputs = tf.keras.Input(shape=(1440*num_well_features))
-        weather_inputs = tf.keras.Input(shape=(24*num_weather_features))
+        well_inputs = tf.keras.Input(shape=(1440*num_well_features), name='well_features')
+        weather_inputs = tf.keras.Input(shape=(24*num_weather_features), name='weather_features')
         well_features = well_model.encoder(well_inputs, training=False)
         weather_features = weather_model.encoder(weather_inputs, training=False)
         x = tf.keras.layers.concatenate([well_features, weather_features])
