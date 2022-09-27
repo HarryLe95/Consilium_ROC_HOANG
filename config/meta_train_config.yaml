@@ -1,13 +1,13 @@
 - all_wells: [ACRUS1, BIGL22, MOOM115, POND1, POND11, POND14, POND16, PSYC3, PSYC7, TIRRA80, TIRRA88, TIRRA91, TIRRA93, TIRRW1, TOOL29, WELTN1, WIPPOS1, YAN1L, YAN2L, YAN2U, YAN4U, YAN8L, WKT3]
-  test_wells: [POND1]
+  test_wells: [TIRRA80]
   features: [ROC_VOLTAGE,FLOW, Mask_ROC_VOLTAGE, Mask_FLOW]
-  num_days: 7
+  num_days: 1
   normalise_mode: all
   base_lr: 0.00005
   early_stopping_patience: 15 
   reduce_lr_patience: 7
-  label_mapping: { 1 : 0, 2 : 1, 3 : 0, 4 : 0, 5 : 1}
-  drop_labels: [0,6,7,8,9]
+  label_mapping: { 1 : 0, 2 : 0, 3 : 0, 4 : 0, 5 : 0, 6 : 0, 7 : 0, 8 : 0, 9 : 1}
+  drop_labels: []
   batch_size: 32
   optimiser: adam
   num_epochs: 100
@@ -15,4 +15,4 @@
   use_pretrain: False 
   pretrain_model: 
   save_model: True
-  save_name: my_model
+  save_name: weather_model
