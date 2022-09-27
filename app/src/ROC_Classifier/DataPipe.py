@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np 
 import yaml
 from geopy import distance 
+from sklearn.preprocessing import StandardScaler
 
 from src.aau.S3Manager import S3Manager
 from src.utils.PathManager import Paths as Path
@@ -14,6 +15,13 @@ from src.utils.PathManager import Paths as Path
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+
+weather_features = ['temperature_2m', 'cloudcover',
+       'cloudcover_low', 'cloudcover_mid', 'cloudcover_high',
+       'shortwave_radiation', 'direct_radiation', 'diffuse_radiation',
+       'direct_normal_irradiance']
+
+well_features = ['ROC_VOLTAGE', 'FLOW']
 class S3ROCManager(S3Manager):
     """S3 aau wrapper that provides a convenient interface for working with ROC data.
 
@@ -57,7 +65,7 @@ class S3ROCManager(S3Manager):
             return count 
         count_dict = {well:get_label_count(self.label_dict[well].values()) for well in self.label_dict}
         self.well_label_count = pd.DataFrame(count_dict).T
-
+        return self.well_label_count
 
     @staticmethod
     def process_well_location(file:str='well_location.csv'):
@@ -453,3 +461,86 @@ class S3ROCManager(S3Manager):
             new_df.to_pickle(Path.data(f"{well_code}_{start}_{end}_labelled.pkl"))
             logger.info(f"Save labelled data to {well_code}_{start}_{end}_labelled.pkl")
         return new_df
+
+    def classify_voltage_type(self):
+        voltage = {}
+        for well in self.all_labelled_wells:
+            df = pd.read_csv(Path.data(f"{well}_2016-01-01_2023-01-01_raw.csv"))
+            v = df.ROC_VOLTAGE[df.Mask_ROC_VOLTAGE==1].mean()
+
+            if v >= 20:
+                voltage[well]=24
+            else:
+                voltage[well]=12
+        with open(Path.config("well_type.yaml"),'w') as file:
+            yaml.dump(voltage, file, default_flow_style=False)
+        return voltage
+
+    def calculate_weather_transform_params(self):
+        weather = {}
+        all_df = []
+        for station in self.all_stations:
+            weather[station]={feature:{} for feature in weather_features}
+            df = pd.read_csv(Path.data(f"{station}_2016-01-01_2023-01-01_weather.csv"), usecols=weather_features)
+            all_df.append(df)
+            for feature in df.columns:
+                scaler = StandardScaler()
+                scaler.fit(df[feature].values.reshape(-1,1))
+                weather[station][feature]['mean']=float(scaler.mean_[0])
+                weather[station][feature]['var']=float(scaler.var_[0])
+                weather[station][feature]['scale']=float(scaler.scale_[0])
+        all_df = pd.concat(all_df,axis=0)
+        all_weather = {feature:{} for feature in weather_features}
+        for feature in all_df.columns:
+            scaler = StandardScaler()
+            scaler.fit(all_df[feature].values.reshape(-1,1))
+            all_weather[feature]['mean']=float(scaler.mean_[0])
+            all_weather[feature]['var']=float(scaler.var_[0])
+            all_weather[feature]['scale']=float(scaler.scale_[0])
+        weather_param_dict = {'one': weather, 'all': all_weather}
+        with open(Path.config("station_transform_params.yaml"),'w') as file:
+            yaml.dump(weather_param_dict, file, default_flow_style=False)
+        return weather_param_dict
+
+    def calculate_well_transform_params(self):
+        well_params = {}
+        all_df = {12:[], 24: []}
+        all_well_params = {12:{}, 24: {}}
+
+        if not Path.config("well_type.yaml").exists():
+            voltage_type = self.classify_voltage_type()
+        else:
+            with open(Path.config("well_type.yaml"),'r') as file:
+                voltage_type = yaml.safe_load(file)
+
+        for well in self.all_labelled_wells:
+            well_params[well]={feature:{} for feature in well_features}
+            df = pd.read_csv(Path.data(f"{well}_2016-01-01_2023-01-01_raw.csv"))
+            voltage = voltage_type[well]
+            if voltage == 12:
+                all_df[12].append(df)
+            else:
+                all_df[24].append(df)
+            for feature in well_features:
+                mask = df["Mask_"+feature] == 1
+                scaler = StandardScaler()
+                scaler.fit(df[feature][mask].values.reshape(-1,1))
+                well_params[well][feature]['mean']=float(scaler.mean_[0])
+                well_params[well][feature]['var']=float(scaler.var_[0])
+                well_params[well][feature]['scale']=float(scaler.scale_[0])
+
+        for v in [12,24]:
+            all_df_ = pd.concat(all_df[v],axis=0)
+            all_well_params[v] = {feature: {} for feature in well_features}
+            for feature in well_features:
+                mask = all_df_["Mask_"+feature] == 1
+                scaler = StandardScaler()
+                scaler.fit(all_df_[feature][mask].values.reshape(-1,1))
+                all_well_params[v][feature]['mean']=float(scaler.mean_[0])
+                all_well_params[v][feature]['var']=float(scaler.var_[0])
+                all_well_params[v][feature]['scale']=float(scaler.scale_[0])
+
+        well_param_dict = {'one': well_params, 'all': all_well_params}
+        with open(Path.config("well_transform_params.yaml"),'w') as file:
+            yaml.dump(well_param_dict, file, default_flow_style=False)
+        return well_param_dict, all_df
