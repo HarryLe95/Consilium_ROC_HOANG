@@ -38,7 +38,6 @@ def main():
                              reduce_lr_patience=args.reduce_lr_patience, num_epochs = args.num_epochs, metrics = args.metrics, use_pretrain=args.use_pretrain,
                              pretrain_model=args.pretrain_model, save_model=args.save_model, save_name=args.save_name)
     trainer.setup()
-    tf.keras.utils.plot_model(trainer.model,'Weather_Classification_Model.png')
     history = trainer.fit(x = data_generator.train_image, 
                           y = data_generator.train_label, 
                           validation_data=(data_generator.val_image, data_generator.val_label),
