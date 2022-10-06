@@ -1,10 +1,12 @@
 from src.utils.PathManager import Paths as Path 
-from src.utils.Data import get_dataset_from_image_label, get_combined_data, get_scaler, get_random_split_from_image_label
+from src.utils.Data import get_dataset_from_image_label, get_combined_data, get_scaler, get_random_split_from_image_label, get_combined_regression_data
 from typing import Sequence 
 import yaml 
 import tensorflow as tf 
 import numpy as np
 import logging 
+import pandas as pd 
+from datetime import timedelta 
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -56,6 +58,8 @@ class ROC_Generator:
         self.split_ratio = split_ratio
         self.num_classes = num_classes
         self.batch_size = batch_size 
+        with open(Path.config("nearest_station.yaml"),'r') as file:
+            self.station_dict = yaml.safe_load(file)
         
     def _get_scaler(self):
         scaler = []
@@ -80,3 +84,22 @@ class ROC_Generator:
             self.TS = TS
         
         logger.debug(f"Prepared dataset for wells: {self.wells} with split: {self.split}")
+
+    def setup_regression(self):
+        self.scaler = self._get_scaler()
+        image, label, TS = get_combined_regression_data(self.wells, self.features, self.num_days, self.scaler)
+        if self.split:
+            train_image, train_label, train_TS, val_image, val_label, val_TS = get_random_split_from_image_label(image, label, TS, self.split_ratio)
+            train_dataset = get_dataset_from_image_label(train_image, train_label,self.batch_size)
+            val_dataset = get_dataset_from_image_label(val_image, val_label,self.batch_size)
+            self.dataset = [train_dataset, val_dataset]
+            self.TS = [train_TS, val_TS]
+        else:
+            self.dataset = get_dataset_from_image_label(image,label)
+            self.TS = TS
+        logger.debug(f"Prepared dataset for wells: {self.wells} with split: {self.split}")
+    
+
+        
+        
+        

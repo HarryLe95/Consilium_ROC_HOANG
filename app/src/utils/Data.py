@@ -94,7 +94,7 @@ def get_dataset_from_image_label(image: np.ndarray, label: np.ndarray, batch_siz
 
 def get_dataset_image_label(well_name: str, features: Sequence[str]=['ROC_VOLTAGE'], num_days:int=7,
                           file_post_fix:str="2016-01-01_2023-01-01_labelled", file_ext:str='pkl',
-                          scaler:StandardScaler=None, label_mapping: dict=None, drop_labels: Sequence[int]=None) -> tuple[np.ndarray,np.ndarray, np.ndarray]:
+                          scaler:StandardScaler=None, label_mapping: dict=None, drop_labels: Sequence[int]=None, label_col:str="labels") -> tuple[np.ndarray,np.ndarray, np.ndarray]:
     """Create an image label TS triplet with all preprocessing steps applied.
 
     Preprocessing steps include: 
@@ -113,6 +113,7 @@ def get_dataset_image_label(well_name: str, features: Sequence[str]=['ROC_VOLTAG
         scaler (StandardScaler, optional): data scaler. Defaults to None.
         label_mapping (dict, optional): dictionary specifying relabelling rules. Defaults to None - no relabelling.
         drop_labels (Sequence[int], optional): list of labels to be dropped from the dataset. Defaults to None.
+        label_col (str, optional): name of label column 
 
     Returns:
         tuple[np.ndarray,np.ndarray, np.ndarray]: output data, label, timestamp tuple
@@ -139,7 +140,7 @@ def get_dataset_image_label(well_name: str, features: Sequence[str]=['ROC_VOLTAG
                 all_image = image
             else: 
                 all_image = np.concatenate([all_image, image],axis=1)
-    label = df.labels.values
+    label = df[label_col].values
     TS = df.index.to_numpy()
     return all_image, label, TS 
 
@@ -158,6 +159,7 @@ def get_random_split_from_image_label(image: np.ndarray, label: np.ndarray, TS: 
     """
     index = np.arange(len(image))
     np.random.shuffle(index)
+    label=label.reshape(-1,1)
     train_index = index[:int(len(index)*train_ratio)]
     val_index = index[int(len(index)*train_ratio):]
     train_image = image[train_index,:]
@@ -202,6 +204,38 @@ def get_combined_data(well_name: str|Sequence[str], features: Sequence[str]=['RO
                 label = np.concatenate([label, well_label],axis=0)
                 TS = np.concatenate([TS, well_TS])
         return image, label, TS
-    
+
+
+def get_combined_regression_data(well_name, features, num_days, scaler):
+    """Create an image label TS triplet with all preprocessing steps applied from one well or from a group of wells
+
+    Args:
+        well_name (str | Sequence[str]): if str - name of one well, if list - name of a set of wells to be combined. 
+        features (Sequence[str], optional): data features. Defaults to ['ROC_VOLTAGE'].
+        num_days (int, optional): number of days to form data sequence. Defaults to 7.
+        scaler (StandardScaler, optional): scaler. Defaults to None.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray]: image, label, TS triplet of the dataset
+    """
+    #Dataset comprises of 1 well
+    if isinstance(well_name,str):
+        return get_dataset_image_label(well_name=well_name, features=features, num_days=num_days, scaler=scaler, file_post_fix="2016-01-01_2023-01-01_regression",label_col='days_to_failure')
+    #Dataset comprises of multiple wells
+    if hasattr(well_name,'__iter__') and not isinstance(well_name,str):
+        assert type(scaler)== type(well_name)
+        assert len(scaler) == len(well_name)
+        for index in range(len(well_name)):
+            well_image, well_label, well_TS = get_dataset_image_label(well_name=well_name[index], features=features, num_days=num_days, 
+                                                                      scaler=scaler[index], file_post_fix="2016-01-01_2023-01-01_regression",label_col='days_to_failure')
+            if index == 0:
+                image = well_image
+                label = well_label
+                TS = well_TS
+            else:
+                image = np.concatenate([image, well_image],axis=0)
+                label = np.concatenate([label, well_label],axis=0)
+                TS = np.concatenate([TS, well_TS])
+        return image, label, TS
     
     

@@ -1,7 +1,7 @@
 - all_wells: [ACRUS1, BIGL22, MOOM115, POND1, POND11, POND14, POND16, PSYC3, PSYC7, TIRRA80, TIRRA88, TIRRA91, TIRRA93, TIRRW1, TOOL29, WELTN1, WIPPOS1, WKT3, YAN1L, YAN2L, YAN2U, YAN4U, YAN8L]
   test_wells: [POND1]
-  features: [ROC_VOLTAGE,FLOW]
-  num_days: 7
+  features: [ROC_VOLTAGE,FLOW, Mask_ROC_VOLTAGE, Mask_FLOW]
+  num_days: 1
   normalise_mode: all
   base_lr: 0.00005
   early_stopping_patience: 15 
@@ -11,7 +11,7 @@
   batch_size: 32
   optimiser: adam
   num_epochs: 100
-  metrics: [acc,iou]
+  metrics: ['mae','mse']
   use_pretrain: True 
   pretrain_model: my_model
   save_model: False
