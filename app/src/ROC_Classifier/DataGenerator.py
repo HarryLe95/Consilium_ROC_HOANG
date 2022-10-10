@@ -173,6 +173,8 @@ class ROC_Generator:
                                                                             num_days =self.num_days, 
                                                                             scaler=self.scaler, 
                                                                             last_day=self.last_day)
+        label = label.reshape(-1,1).astype(np.float32)
+        
         if self.split:
             split_result = get_random_split_from_image_label(image_well=image_well, 
                                                              image_weather=image_weather,

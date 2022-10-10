@@ -205,25 +205,28 @@ class ROC_Regressor:
                   metrics=self.metrics)
         logger.debug("Compile model.")
         
-    def fit(self, train_dataset: tf.data.Dataset, val_dataset: tf.data.Dataset):
+    def fit(self, x, y, validation_data, batch_size):
         logger.debug("Fit to training and validation dataset.")
-        history = self.model.fit(train_dataset, validation_data= val_dataset, callbacks = self.callbacks, epochs = self.num_epochs)
+        history = self.model.fit(x=x,y=y, 
+                    validation_data= validation_data, 
+                    batch_size = batch_size,
+                    callbacks = self.callbacks, epochs = self.num_epochs)
         
         if self.save_model:
             self.model.save(Path.model("model",self.save_name))
             logger.debug(f"Save trained model to {self.save_name}")
         return history 
     
-    def predict(self, test_dataset: tf.data.Dataset|np.ndarray, TS:np.ndarray): 
+    def predict(self, x, TS:np.ndarray): 
         logger.debug("Getting model's prediction on test dataset")
-        predictions = self.model.predict(test_dataset)
+        predictions = self.model.predict(x)
         prediction_df = pd.DataFrame({"TS":TS,"days_to_failure":predictions.reshape(-1)})
         prediction_df.set_index("TS",inplace=True)
         return prediction_df
     
-    def evaluate(self, test_dataset: tf.data.Dataset|np.ndarray):
+    def evaluate(self, x, y):
         logger.debug("Getting model evaluation on test dataset")
-        test_loss = self.model.evaluate(test_dataset)
+        test_loss = self.model.evaluate(x=x,y=y)
         logger.debug(f"Evaluation metrics: {test_loss}")
         return test_loss
     

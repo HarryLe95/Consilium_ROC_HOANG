@@ -216,38 +216,64 @@ def get_combined_data(well_name: str|Sequence[str],
                 label = np.concatenate([label, well_label],axis=0)
                 TS = np.concatenate([TS, well_TS])
         return image_well, image_weather, label, TS
-
-
-def get_combined_regression_data(well_name, features, num_days, scaler):
-    """Create an image label TS triplet with all preprocessing steps applied from one well or from a group of wells
+    
+def get_combined_regression_data(well_name: str|Sequence[str], 
+                                 well_features: Sequence[str]=['ROC_VOLTAGE'],
+                                 weather_features: Sequence[str]=None, 
+                                 num_days:int=7, scaler:StandardScaler=None, 
+                                 label_mapping:dict=None, 
+                                 drop_labels:Sequence[int]=None,
+                                 last_day:str|datetime=None,
+                                 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Create an image_well, image_weather, label TS tuple with all preprocessing steps applied 
+    from one well or from a group of wells
 
     Args:
         well_name (str | Sequence[str]): if str - name of one well, if list - name of a set of wells to be combined. 
-        features (Sequence[str], optional): data features. Defaults to ['ROC_VOLTAGE'].
+        well_features (Sequence[str], optional): well features. Defaults to ['ROC_VOLTAGE'].
+        weather_features (Sequence[str], optional): weather features. Defaults to None.
         num_days (int, optional): number of days to form data sequence. Defaults to 7.
         scaler (StandardScaler, optional): scaler. Defaults to None.
+        label_mapping (dict, optional): dictionary specifying the relabelling rules. Defaults to None.
+        drop_labels (Sequence[int], optional): list of labels to be dropped from dataset. Defaults to None.
 
     Returns:
-        tuple[np.ndarray, np.ndarray, np.ndarray]: image, label, TS triplet of the dataset
+        tuple[np.ndarray, np.ndarray, np.ndarray]: image_well, image_weather, label, TS tuple of the dataset
     """
     #Dataset comprises of 1 well
     if isinstance(well_name,str):
-        return get_dataset_image_label(well_name=well_name, features=features, num_days=num_days, scaler=scaler, file_post_fix="2016-01-01_2023-01-01_regression",label_col='days_to_failure')
+        return get_dataset_image_label(well_name=well_name, 
+                                       well_features=well_features,
+                                       weather_features=weather_features, 
+                                       num_days=num_days,
+                                       scaler=scaler, 
+                                       file_post_fix="2016-01-01_2023-01-01_regression",
+                                       label_col='days_to_failure',
+                                       last_day=last_day)
     #Dataset comprises of multiple wells
     if hasattr(well_name,'__iter__') and not isinstance(well_name,str):
         assert type(scaler)== type(well_name)
         assert len(scaler) == len(well_name)
         for index in range(len(well_name)):
-            well_image, well_label, well_TS = get_dataset_image_label(well_name=well_name[index], features=features, num_days=num_days, 
-                                                                      scaler=scaler[index], file_post_fix="2016-01-01_2023-01-01_regression",label_col='days_to_failure')
+            well_image, weather_image, well_label, well_TS = get_dataset_image_label(well_name=well_name[index], 
+                                                                      well_features=well_features, 
+                                                                      weather_features=weather_features,
+                                                                      num_days=num_days, 
+                                                                      scaler=scaler[index], 
+                                                                      file_post_fix="2016-01-01_2023-01-01_regression",
+                                                                      label_col='days_to_failure',
+                                                                      last_day=last_day)
             if index == 0:
-                image = well_image
+                image_well = well_image
+                image_weather = weather_image if weather_features is not None else None 
                 label = well_label
                 TS = well_TS
             else:
-                image = np.concatenate([image, well_image],axis=0)
+                image_well = np.concatenate([image_well, well_image],axis=0)
+                image_weather = np.concatenate([image_weather, weather_image],axis=0) if weather_features is not None else None 
                 label = np.concatenate([label, well_label],axis=0)
                 TS = np.concatenate([TS, well_TS])
-        return image, label, TS
+        return image_well, image_weather, label, TS
+
     
     

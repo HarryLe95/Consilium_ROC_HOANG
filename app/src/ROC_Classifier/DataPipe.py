@@ -548,7 +548,7 @@ class S3ROCManager(S3Manager):
     @staticmethod 
     def read_regression_label(well_name, 
                               window=6, 
-                              pool_period:int = 90, 
+                              pool_period:int = 300, 
                               threshold:int = 30, 
                               to_csv=True):
         #Load well raw data 
