@@ -1,10 +1,12 @@
 from src.utils.PathManager import Paths as Path 
-from src.utils.Data import get_combined_data, get_random_split_from_image_label
+from src.utils.Data import  get_combined_data, get_random_split_from_image_label, get_combined_regression_data
 from typing import Sequence 
 import yaml 
 import tensorflow as tf 
 import numpy as np
 import logging 
+import pandas as pd 
+from datetime import timedelta 
 from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)
@@ -77,7 +79,7 @@ class ROC_Generator:
         self.split_ratio = split_ratio
         self.num_classes = num_classes
         self.last_day=last_day
-
+        
     @staticmethod
     def get_scaler_from_config(mean: float|Sequence[float],var: float|Sequence[float],scale: float|Sequence[float]) -> StandardScaler:
         """Create a Standard Scaler object from known data statistics
@@ -121,7 +123,7 @@ class ROC_Generator:
                                                             station_params[feature]['scale']) 
                             for feature in weather_features if "Mask" not in feature})
         return scaler_dict
-
+        
     def _get_scaler(self):
         scaler = []
         for well in self.wells:
@@ -162,3 +164,38 @@ class ROC_Generator:
             self.TS = TS
         
         logger.debug(f"Prepared dataset for wells: {self.wells} with split: {self.split}")
+
+    def setup_regression(self):
+        self.scaler = self._get_scaler()
+        image_well, image_weather, label, TS = get_combined_regression_data(well_name = self.wells, 
+                                                                            well_features = self.well_features, 
+                                                                            weather_features = self.weather_features,
+                                                                            num_days =self.num_days, 
+                                                                            scaler=self.scaler, 
+                                                                            last_day=self.last_day)
+        if self.split:
+            split_result = get_random_split_from_image_label(image_well=image_well, 
+                                                             image_weather=image_weather,
+                                                             label=label, 
+                                                             TS=TS, 
+                                                             train_ratio=self.split_ratio)
+            train_image_well, train_image_weather, train_label, train_TS, \
+            val_image_well, val_image_weather, val_label, val_TS = split_result
+            self.train_image = [train_image_well, train_image_weather] if self.weather_features is not None else \
+                               [train_image_well]
+            self.train_label = train_label
+            self.val_image   = [val_image_well, val_image_weather] if self.weather_features is not None else \
+                               [val_image_well]
+            self.val_label   = val_label
+            self.TS = [train_TS, val_TS]
+        else:
+            self.image = [image_well, image_weather] if self.weather_features is not None else \
+                         [image_well]
+            self.label = label
+            self.TS = TS
+        logger.debug(f"Prepared dataset for wells: {self.wells} with split: {self.split}")
+    
+
+        
+        
+        

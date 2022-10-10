@@ -36,7 +36,7 @@ def get_argparse(descriptor:str="ROC_Classification Model") -> argparse.Namespac
         argparse.Namespace: argparse object
     """
     parser=argparse.ArgumentParser(description=descriptor)
-    parser.add_argument("-meta_config", type=str, default="meta_train_config.yaml", help="Name of meta_config file in the config directory. Name should be filename.yaml and does not include path.")
+    parser.add_argument("-meta_config", type=str, default="meta_train_config_regression.yaml", help="Name of meta_config file in the config directory. Name should be filename.yaml and does not include path.")
     args = parser.parse_args()
     with open(Path.config(args.meta_config),'r') as file:
         _config = yaml.safe_load(file)[0]

@@ -52,3 +52,33 @@ def get_classifier(num_classes: int, num_well_features: int, num_weather_feature
         outputs = tf.keras.layers.Dense(num_classes, activation='softmax')(x)
         classification_model = tf.keras.Model(well_inputs, outputs)
     return classification_model
+
+def get_regressor(num_well_features: int, num_weather_features: int=0) -> tf.keras.Model:
+    """Get regression model
+
+    Args:
+        num_well_features (int): dimension of input well features
+        num_weather_features (int): dimension of weather features. Defaults to 0
+
+    Returns:
+        tf.keras.Model: classification model
+    """
+    if num_weather_features != 0:
+        well_model = BaseClassifier(num_well_features)
+        weather_model = BaseClassifier(num_weather_features)
+        well_inputs = tf.keras.Input(shape=(1440*num_well_features), name='well_features')
+        weather_inputs = tf.keras.Input(shape=(24*num_weather_features), name='weather_features')
+        well_features = well_model.encoder(well_inputs, training=False)
+        weather_features = weather_model.encoder(weather_inputs, training=False)
+        x = tf.keras.layers.concatenate([well_features, weather_features])
+        x = tf.keras.layers.Dropout(0.2)(x)
+        outputs = tf.keras.layers.Dense(1)(x)
+        regression_model = tf.keras.Model([well_inputs, weather_inputs], outputs)
+    else:
+        well_model = BaseClassifier(num_well_features)
+        well_inputs = tf.keras.Input(shape=(1440*num_well_features))
+        well_features = well_model.encoder(well_inputs, training=False)
+        x = tf.keras.layers.Dropout(0.2)(well_features)
+        outputs = tf.keras.layers.Dense(1)(x)
+        regression_model = tf.keras.Model([well_inputs], outputs)
+    return regression_model

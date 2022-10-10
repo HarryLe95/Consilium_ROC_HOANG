@@ -1,12 +1,13 @@
 from src.utils.PathManager import Paths as Path
 from src.utils.Metrics import IoU
-from src.utils.Model import get_classifier
+from src.utils.Model import get_classifier, get_regressor
 from sklearn.metrics import confusion_matrix, accuracy_score
 import tensorflow as tf 
 from typing import Sequence
 import logging 
 import numpy as np 
 import datetime
+import pandas as pd 
 
 logger = logging.getLogger(__name__)
 
@@ -129,3 +130,100 @@ class ROC_Classifier:
         logger.debug(f"\n{cm}")
         return cm, mismatch 
         
+class ROC_Regressor:
+    def __init__(self, 
+                 num_well_features: int = 1440,
+                 num_weather_features:int = 0,
+                 optimiser:str='adam',
+                 loss_type:str='mse',
+                 base_lr:float=1e-3,
+                 early_stopping_patience:int=10,
+                 reduce_lr_patience:int=5,
+                 num_epochs:int=100,
+                 metrics:str|Sequence[str]=['mae','mse'],
+                 use_pretrain:bool=False,
+                 pretrain_model:str=None,
+                 save_model:bool=False,
+                 save_name:str=None):
+        self.num_well_features = num_well_features 
+        self.num_weather_features = num_weather_features
+        self.opt = optimiser
+        self.base_lr = base_lr 
+        self.early_stopping_patience = early_stopping_patience
+        self.reduce_lr_patience = reduce_lr_patience
+        self.num_epochs = num_epochs 
+        self.metrics_list = metrics 
+        self.use_pretrain = use_pretrain 
+        self.pretrain_model = pretrain_model 
+        self.save_model = save_model 
+        self.save_name = save_name 
+        self.loss_type = loss_type
+        
+    def get_opt(self):
+        logger.debug(f"Using optimiser: {self.opt}")
+        if self.opt == 'adam':
+            return tf.keras.optimizers.Adam(learning_rate=self.base_lr)
+        elif self.opt == 'sgd':
+            return tf.keras.optimizer.SGD(learning_rate=self.base_lr)
+        else:
+            logger.warning("Unsupported optimiser, reverting to adam.")
+            return tf.keras.optimizers.Adam(learning_rate=self.base_lr)
+    
+    def get_model(self):
+        if self.use_pretrain:
+            logger.debug(f"Loading pretrained model at {self.pretrain_model}.")
+            return tf.keras.models.load_model(Path.model(self.pretrain_model))
+        logger.debug(f"Loading random init model.")
+        return get_regressor(self.num_well_features, self.num_weather_features)
+    
+    def get_metrics(self):
+        metrics = self.metrics_list
+        return metrics
+            
+    def get_callbacks(self):
+        logger.debug(f"Using early stopping callback with patience: {self.early_stopping_patience}")
+        logger.debug(f"Using reduce learning rate on plateau callback with patience: {self.reduce_lr_patience}")
+        callbacks = [tf.keras.callbacks.EarlyStopping(    monitor='val_loss', mode = 'min', patience=self.early_stopping_patience),
+                     tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', mode = 'min', patience=self.reduce_lr_patience)]
+        return callbacks
+        
+    def get_loss(self):
+        logger.debug(f"Using {self.loss_type} for model training")
+        if self.loss_type == 'mae' or self.loss_type == "MAE":
+            return tf.keras.losses.MeanAbsoluteError()
+        elif self.loss_type == 'mse' or self.loss_type == "MSE":
+            return tf.keras.losses.MeanSquaredError()
+    
+    def setup(self):
+        self.optimiser = self.get_opt()
+        self.callbacks = self.get_callbacks()
+        self.metrics = self.get_metrics()
+        self.loss = self.get_loss()
+        self.model = self.get_model()
+        self.model.compile(optimizer= self.optimiser,
+                  loss=self.loss,
+                  metrics=self.metrics)
+        logger.debug("Compile model.")
+        
+    def fit(self, train_dataset: tf.data.Dataset, val_dataset: tf.data.Dataset):
+        logger.debug("Fit to training and validation dataset.")
+        history = self.model.fit(train_dataset, validation_data= val_dataset, callbacks = self.callbacks, epochs = self.num_epochs)
+        
+        if self.save_model:
+            self.model.save(Path.model("model",self.save_name))
+            logger.debug(f"Save trained model to {self.save_name}")
+        return history 
+    
+    def predict(self, test_dataset: tf.data.Dataset|np.ndarray, TS:np.ndarray): 
+        logger.debug("Getting model's prediction on test dataset")
+        predictions = self.model.predict(test_dataset)
+        prediction_df = pd.DataFrame({"TS":TS,"days_to_failure":predictions.reshape(-1)})
+        prediction_df.set_index("TS",inplace=True)
+        return prediction_df
+    
+    def evaluate(self, test_dataset: tf.data.Dataset|np.ndarray):
+        logger.debug("Getting model evaluation on test dataset")
+        test_loss = self.model.evaluate(test_dataset)
+        logger.debug(f"Evaluation metrics: {test_loss}")
+        return test_loss
+    
