@@ -4,13 +4,13 @@ from datetime import timedelta
 
 colour_dict = {0:'gold',
                1:'orchid',
-               2:'navy',
-               3:'salmon',
-               4:'red', 
+               2:'purple',
+               3:'pink',
+               4:'orange', 
                5:'darkred',
                6:'wheat', 
                7:'yellowgreen',
-               8:'mediumvioletred',
+               8:'wheat',
                9:'aqua'}
 
 weather_color_dict ={
@@ -132,3 +132,72 @@ def plot_ROC(raw_df, well_name, weather_df=None, label_df=None, regression_label
     plt.xlabel("TS")
     return fig 
     
+def plot_ROC_simple(raw_df, label_df, start, end, ylim=None, weather_df = None, generated_feature_df=None):
+    label = label_df.loc[start:end].labels
+    
+    num_subplots = 3
+    if weather_df is not None:
+        num_subplots += 2
+    
+    if generated_feature_df is not None:
+        num_subplots += len(generated_feature_df.columns)
+    
+    fig, ax = plt.subplots(num_subplots, figsize=(35,15), sharex=True)
+    ax[0].scatter(raw_df.ROC_VOLTAGE.loc[start:end].index, raw_df.ROC_VOLTAGE.loc[start:end], s=1, c='green')
+    ax[1].scatter(raw_df.FLOW.loc[start:end].index, raw_df.FLOW.loc[start:end], s=1, c='green')
+    ax[2].scatter(raw_df.PRESSURE_TH.loc[start:end].index, raw_df.PRESSURE_TH.loc[start:end], s=1, c='green')
+    
+    subplot_idx = 3
+    
+    if weather_df is not None:
+        ax[subplot_idx].plot(weather_df.cloudcover[start:end], c='green', label = 'cloud_cover')
+        ax[subplot_idx].set_ylabel("Cloud cover")
+        ax[subplot_idx].legend()
+        
+        ax[subplot_idx+1].plot(weather_df.direct_radiation.loc[start:end], c='green', label='direct_radiation')
+        ax[subplot_idx+1].set_ylabel("Radiation")
+        ax[subplot_idx+1].legend()
+        subplot_idx += 2
+    
+    if generated_feature_df is not None:
+        for feature in generated_feature_df.columns:
+            ax[subplot_idx].plot(generated_feature_df.loc[start:end][feature], c='green', label = feature)
+            ax[subplot_idx].set_ylabel(feature)
+            ax[subplot_idx].legend()
+            subplot_idx+=1
+
+    #Plot label    
+    if len(label)!=0:
+        for i in range(len(label)):
+            x_start = label.index[i]
+            x_end = x_start + timedelta(days=1)
+            colour = colour_dict[label[i]]
+            ax[0].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
+            ax[1].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
+            ax[2].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
+            subplot_idx = 3
+            if weather_df is not None:
+                ax[subplot_idx].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
+                ax[subplot_idx+1].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
+                subplot_idx = 5
+            if generated_feature_df is not None:
+                for _ in generated_feature_df.columns:
+                    ax[subplot_idx].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
+                    ax[subplot_idx].grid()
+                    subplot_idx += 1
+                
+    if ylim is not None:
+        if "ROC_VOLTAGE" in ylim:
+            ax[0].set_ylim(ylim["ROC_VOLTAGE"])
+        if "FLOW" in ylim:
+            ax[1].set_ylim(ylim["FLOW"])
+        if "PRESSURE_TH" in ylim:
+            ax[2].set_ylim(ylim["PRESSURE_TH"])
+    ax[0].grid()
+    ax[0].set_ylabel("ROC VOLTAGE")
+    ax[1].set_ylabel("FLOW")
+    ax[2].set_ylabel("PRESSURE_TH")
+    
+    markers = [plt.Line2D([0,0],[0,0],color=color, marker='o', linestyle='',ms=8) for color in colour_dict.values()]
+    ax[2].legend(markers, colour_dict.keys(), numpoints=1,prop={'size': 8})
+    return fig
