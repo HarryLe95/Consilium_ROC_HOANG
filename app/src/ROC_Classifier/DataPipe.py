@@ -1,5 +1,5 @@
 import logging 
-from   typing   import List 
+from   typing   import List, Optional, Sequence 
 from   datetime import timedelta 
 from   datetime import datetime as datetime
 
@@ -167,7 +167,8 @@ class S3ROCManager(S3Manager):
     
     def get_nearest_station(self, 
                              well_location:str='well_location.csv', 
-                             station_location:str='station_location.csv') -> dict:
+                             station_location:str='station_location.csv',
+                             target_wells:str|Sequence[str]|None=None) -> dict:
         """Get nearest neighbor dictionary whose keys are wells and corresponding values the nearest stations.
 
         Args:
@@ -180,7 +181,8 @@ class S3ROCManager(S3Manager):
         self.init_label_data()
         well_loc = self.get_well_location(well_location)
         station_loc = self.get_station_location(station_location)
-        well_loc = well_loc.loc[self.all_labelled_wells]
+        target_wells = target_wells if target_wells is not None else self.all_labelled_wells 
+        well_loc = well_loc.loc[target_wells]
         distance_matrix = self.get_distance_matrix(well_loc, station_loc)
         logger.info("Getting nearest well:station dict.")
         return self._get_nearest_neighbor(distance_matrix)
@@ -461,13 +463,13 @@ class S3ROCManager(S3Manager):
             new_df.to_pickle(Path.data(f"{well_code}_{start}_{end}_labelled.pkl"))
             logger.info(f"Save labelled data to {well_code}_{start}_{end}_labelled.pkl")
         return new_df
-    
+
     def classify_voltage_type(self):
         voltage = {}
         for well in self.all_labelled_wells:
             df = pd.read_csv(Path.data(f"{well}_2016-01-01_2023-01-01_raw.csv"))
             v = df.ROC_VOLTAGE[df.Mask_ROC_VOLTAGE==1].mean()
-            
+
             if v >= 20:
                 voltage[well]=24
             else:
@@ -544,79 +546,3 @@ class S3ROCManager(S3Manager):
         with open(Path.config("well_transform_params.yaml"),'w') as file:
             yaml.dump(well_param_dict, file, default_flow_style=False)
         return well_param_dict, all_df
-    
-    @staticmethod 
-    def read_regression_label(well_name, 
-                              window=6, 
-                              pool_period:int = 300, 
-                              threshold:int = 30, 
-                              to_csv=True):
-        #Load well raw data 
-        raw_df = pd.read_csv(Path.data(f"{well_name}_2016-01-01_2023-01-01_raw.csv"), index_col="TS", parse_dates=["TS"])
-        raw_df = raw_df.groupby(raw_df.index.date).agg(list)
-        raw_df.index = pd.to_datetime(raw_df.index)
-        raw_df['length'] = raw_df.ROC_VOLTAGE.apply(lambda x:len(x))
-        #Load weather raw data 
-        with open(Path.config("nearest_station.yaml"),'r') as file:
-            station_dict = yaml.safe_load(file)
-        station_name = station_dict[well_name]
-        weather_df = pd.read_csv(Path.data(f"{station_name}_2016-01-01_2023-01-01_weather.csv"), index_col="TS", parse_dates=['TS'])
-        weather_df = weather_df.groupby(weather_df.index.date).agg(list)
-        weather_df.index = pd.to_datetime(weather_df.index)
-        weather_df['length'] = weather_df.cloudcover.apply(lambda x:len(x))
-        #Load label data 
-        label_df = pd.read_pickle(Path.data(f"{well_name}_2016-01-01_2023-01-01_labelled.pkl"))
-        start_period = label_df.index.min() - timedelta(days=pool_period)
-        
-        failures = label_df[label_df.labels.isin([2,5])]
-        
-        end_period = failures.index.max()
-        #Refilter data 
-        raw_df = raw_df.loc[start_period:end_period,:]
-        weather_df = weather_df.loc[start_period:end_period:]
-        raw_df = raw_df[raw_df.length==1440]
-        weather_df = weather_df[weather_df.length==24]
-        raw_df.drop(columns='length', inplace=True)
-        weather_df.drop(columns='length', inplace=True)
-        
-        #Apply days to failure calculation logic 
-        common_dates = np.intersect1d(raw_df.index.date, weather_df.index.date)
-        raw_df = raw_df.loc[common_dates,:]
-        weather_df = weather_df.loc[common_dates,:]
-        agg_df = pd.concat([raw_df, weather_df],axis=1)
-        
-        if len(failures)==0:
-            agg_df["days_to_failure"] = threshold
-        else: 
-            time_to_failure = (agg_df.index.values.astype('datetime64[D]').reshape(-1,1) - failures.index.values.astype('datetime64[D]').reshape(1,-1)).astype(int)
-            function = lambda x: np.abs(x[x<=0].max())
-            time_to_failure = np.apply_along_axis(function,1,time_to_failure)
-            time_to_failure[time_to_failure > threshold] = threshold 
-            agg_df["days_to_failure"]=time_to_failure
-            
-        new_df = pd.DataFrame(columns=agg_df.columns)
-        for index in agg_df.index:
-            drop_index = False
-            days = pd.date_range(index-timedelta(days=window),index)
-            new_df.loc[index,'days_to_failure'] = agg_df.loc[index,'days_to_failure']
-            try:
-                items = agg_df.loc[days,:]
-                for col in items.columns:
-                    if col == 'days_to_failure':
-                        continue
-                    else:
-                        new_df.loc[index,col] = np.hstack(items[col].values).astype(object)
-                        if col in raw_df.columns and len(new_df.loc[index,col]) < 1400 * (window+1):
-                            drop_index=True
-                        if col in weather_df.columns and len(new_df.loc[index,col]) < 24 * (window+1):
-                            drop_index=True
-                
-            except Exception as e:
-                drop_index = True
-                print(e)
-            if drop_index:
-                new_df.drop(index, inplace=True)
-            
-        if to_csv:
-            new_df.to_pickle(Path.data(f"{well_name}_2016-01-01_2023-01-01_regression.pkl"))
-        return new_df 
