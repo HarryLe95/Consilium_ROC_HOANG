@@ -133,7 +133,8 @@ def plot_ROC(raw_df, well_name, weather_df=None, label_df=None, regression_label
     return fig 
     
 def plot_ROC_simple(raw_df, label_df, start, end, ylim=None, weather_df = None, generated_feature_df=None):
-    label = label_df.loc[start:end].labels
+    
+    label = label_df.loc[start:end].labels if label_df is not None else None  
     
     num_subplots = 3
     if weather_df is not None:
@@ -167,24 +168,25 @@ def plot_ROC_simple(raw_df, label_df, start, end, ylim=None, weather_df = None, 
             subplot_idx+=1
 
     #Plot label    
-    if len(label)!=0:
-        for i in range(len(label)):
-            x_start = label.index[i]
-            x_end = x_start + timedelta(days=1)
-            colour = colour_dict[label[i]]
-            ax[0].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
-            ax[1].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
-            ax[2].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
-            subplot_idx = 3
-            if weather_df is not None:
-                ax[subplot_idx].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
-                ax[subplot_idx+1].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
-                subplot_idx = 5
-            if generated_feature_df is not None:
-                for _ in generated_feature_df.columns:
+    if label is not None: 
+        if len(label)!=0:
+            for i in range(len(label)):
+                x_start = label.index[i]
+                x_end = x_start + timedelta(days=1)
+                colour = colour_dict[label[i]]
+                ax[0].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
+                ax[1].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
+                ax[2].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
+                subplot_idx = 3
+                if weather_df is not None:
                     ax[subplot_idx].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
-                    ax[subplot_idx].grid()
-                    subplot_idx += 1
+                    ax[subplot_idx+1].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
+                    subplot_idx = 5
+                if generated_feature_df is not None:
+                    for _ in generated_feature_df.columns:
+                        ax[subplot_idx].axvspan(x_start, x_end, ymin=0, ymax=1, color=colour, alpha = 0.5)
+                        ax[subplot_idx].grid()
+                        subplot_idx += 1
                 
     if ylim is not None:
         if "ROC_VOLTAGE" in ylim:
