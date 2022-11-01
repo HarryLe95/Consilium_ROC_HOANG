@@ -164,6 +164,9 @@ def plot_ROC_simple(raw_df, label_df, start, end, ylim=None, weather_df = None, 
         for feature in generated_feature_df.columns:
             ax[subplot_idx].plot(generated_feature_df.loc[start:end][feature], c='green', label = feature)
             ax[subplot_idx].set_ylabel(feature)
+            if feature == "dV_normed":
+                ax[subplot_idx].set_ylim([0.9,1.0])
+                ax[subplot_idx].grid()
             ax[subplot_idx].legend()
             subplot_idx+=1
 

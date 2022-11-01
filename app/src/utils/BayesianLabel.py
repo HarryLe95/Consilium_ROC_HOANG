@@ -10,7 +10,10 @@ class BayesianLabeler:
                  data_features:list=['ROC_VOLTAGE'],
                  mode:str='all',
                  window_length:int=30,
-                 bound_dict:dict={(0.0,0.96):{0:7,1:2,2:1}, (0.96,0.98):{0:3,1:6,2:5}, (0.98,10):{0:0,1:2,2:4}},
+                 bound_dict:dict={(0.0,0.96): {'S1':{0:7,1:2,2:1}, 'S0':{0:0,1:0,2:0}},
+                                  (0.96,0.98):{'S1':{0:3,1:6,2:5}, 'S0':{0:5,1:5,2:5}}, 
+                                  (0.98,10):  {'S1':{0:0,1:2,2:4}, 'S0':{0:5,1:5,2:5}}},
+                 method:str='exp_mean',
                  num_days:int=3,
                  n_std:float=2.3
                  ):
@@ -19,9 +22,11 @@ class BayesianLabeler:
         self.mode = mode 
         self.window_length = window_length
         self.bound_dict = bound_dict 
+        self.method = method 
         self.num_days = num_days 
         self.n_std = n_std
         self.agg_df, self.label_df, self.raw_df, self.weather_df = self.get_data(self.well_cd)
+        self.agg_df, self.rolling_mean, self.rolling_std, self.rolling_max = self.output()
         
     @staticmethod 
     def get_data(well_cd):
@@ -43,6 +48,9 @@ class BayesianLabeler:
         if label_df is not None:
             agg_df["labels"] = label_df.labels
         agg_df.index = pd.to_datetime(agg_df.index)
+        label_df = label_df.loc[:,['labels']]
+        weather_df = weather_df.loc[:,['cloudcover','direct_radiation']]
+        raw_df = raw_df.loc[:,['ROC_VOLTAGE','FLOW','PRESSURE_TH']]
         return agg_df, label_df, raw_df, weather_df 
         
     @staticmethod 
@@ -66,6 +74,20 @@ class BayesianLabeler:
                 agg_df[f"{feature}_night_integral"] = agg_df[feature].apply(lambda x: np.array(x[int(len(x)/2):]).sum()/(len(x[int(len(x)/2):])+0.001) if hasattr(x,"__len__") else 0)
                 feature_list = [f"{feature}_night_integral",f"{feature}_day_integral"]
         return agg_df, feature_list 
+    
+    @staticmethod 
+    def get_nonzero_min(agg_df:pd.DataFrame, feature_list:list=[]):
+        def get_robust_V(x):
+            x = np.array(x[720:])
+            x = x[x!=0]
+            if len(x) <= 10:
+                return np.nan
+            return x.min()
+        agg_df['minV'] = agg_df.ROC_VOLTAGE.apply(lambda x: get_robust_V(x))
+        feature_list.append("minV")
+        return agg_df, feature_list 
+        
+    
     
     @staticmethod 
     def get_running_features(agg_df:pd.DataFrame,
@@ -97,26 +119,7 @@ class BayesianLabeler:
     @staticmethod 
     def get_weather_normalised_dV(agg_df:pd.DataFrame, 
                                   window_length:int=15, 
-                                  method:str='weighted_mean'):
-        def get_robust_V(x):
-            x = np.array(x[720:])
-            x = x[x!=0]
-            if len(x) <= 10:
-                return np.nan
-            return x.min()
-
-        def get_exp_weighted_V(x):
-            index = x.index
-            sub_df = agg_df.loc[index,:]
-            weight = np.arange(len(sub_df))
-            alpha = 2/(window_length + 1)
-            weight = np.power(alpha, weight)
-            sub_df['weight'] = weight
-            mask = sub_df[sub_df.weather_label == 0].index
-            if len(mask) == 0:
-                return np.nan
-            return np.sum(sub_df.loc[mask].weight * sub_df.loc[mask].minV)/np.sum(sub_df.loc[mask].weight)
-        
+                                  method:str='mean'):
         def get_mean_V(x):
             index = x.index
             sub_df = agg_df.loc[index,:]
@@ -131,27 +134,64 @@ class BayesianLabeler:
                 return np.nanmedian(sub_df.minV)
             else:
                 return np.nanmedian(sub_df.loc[mask,'minV']) 
+        
+        def get_90_percentile_V(x):
+            index = x.index
+            sub_df = agg_df.loc[index,:]
+            mask = sub_df[sub_df.weather_label == 0].index
+            if len(mask)==0:
+                return np.nanpercentile(sub_df.minV,90)
+            else:
+                return np.nanpercentile(sub_df.loc[mask,'minV'],90) 
             
-        if method == 'weighted_mean':
-            mean_fn = get_exp_weighted_V
-        elif method == 'mean':
+        def get_10_percentile_V(x):
+            index = x.index
+            sub_df = agg_df.loc[index,:]
+            mask = sub_df[sub_df.weather_label == 0].index
+            if len(mask)==0:
+                return np.nanpercentile(sub_df.minV,10)
+            else:
+                return np.nanpercentile(sub_df.loc[mask,'minV'],10) 
+            
+        def get_exp_mean_V(x):
+            index = x.index
+            sub_df = agg_df.loc[index,:]
+            weight = np.arange(len(sub_df))
+            alpha = -2/(window_length + 1)
+            weight = np.power(alpha, weight)
+            sub_df['weight'] = weight
+            mask = sub_df[sub_df.weather_label == 0].index
+            if len(mask) == 0:
+                return np.nan
+            return np.sum(sub_df.loc[mask].weight * sub_df.loc[mask].minV)/np.sum(sub_df.loc[mask].weight)
+        
+            
+        if method == 'mean':
             mean_fn = get_mean_V
         elif method == 'median':
             mean_fn =  get_median_V
-        mean_fn = get_median_V
-        agg_df['minV'] = agg_df.ROC_VOLTAGE.apply(lambda x: get_robust_V(x))
-        agg_df['meanV']=agg_df['minV'].rolling(window=window_length, min_periods=int(window_length/2)).apply(mean_fn, raw=False)
+        elif method == "90_percentile":
+            mean_fn = get_90_percentile_V
+        elif method == "exp_mean":
+            mean_fn = get_exp_mean_V
+        elif method == '10_percentile':
+            mean_fn = get_10_percentile_V
+            
+        agg_df['meanV']=agg_df['minV'].rolling(window=window_length).apply(mean_fn, raw=False)
         agg_df['dV'] = agg_df['minV'] - agg_df['meanV']
         agg_df['dV_normed'] = agg_df['minV']/agg_df['meanV']
         return agg_df
 
     @staticmethod 
-    def get_conditional_probability(agg_df,num_days:int=3, bound_dict:dict = {(0.0,0.96):{0:7,1:2,2:1}, (0.96,0.98):{0:3,1:6,2:5}, (0.98,10):{0:0,1:2,2:4}}):
+    def get_conditional_probability(agg_df,num_days:int=3, bound_dict:dict = {(0.0,0.96): {'S1':{0:7,1:2,2:1}, 'S0':{0:0,1:0,2:0}},
+                                                                              (0.96,0.98):{'S1':{0:3,1:6,2:5}, 'S0':{0:5,1:5,2:5}}, 
+                                                                              (0.98,10):  {'S1':{0:0,1:2,2:4}, 'S0':{0:5,1:5,2:5}}}):
         lowerbounds = [i[0] for i in bound_dict.keys()]
         upperbounds = [i[1] for i in bound_dict.keys()]
         
         for day in range(num_days):
-            assert(sum([j[day] for j in bound_dict.values()])==10)
+            assert(sum([j['S1'][day] for j in bound_dict.values()])==10)
+            assert(sum([j['S0'][day] for j in bound_dict.values()])==10)
         
         def get_conditional_probability_(data, days=0):
             pos = 1
@@ -159,7 +199,7 @@ class BayesianLabeler:
             for i in range(days+1):
                 pos *= data[f"P_dV_{upperbounds[data[f'dV_normed_group_{i}']]}_S1_{i}"]
                 neg *= data[f"P_dV_{upperbounds[data[f'dV_normed_group_{i}']]}_S0_{i}"]
-            return (pos*0.02)/(pos*0.02 + neg*0.98 + 1e-5)
+            return (pos*0.02)/(pos*0.02 + neg*0.98 + 1e-16)
         
         for day in range(num_days):
             agg_df[f'P_S1_{day}'] = 0
@@ -175,11 +215,11 @@ class BayesianLabeler:
             neg_df[f'n_occ_{day}'] = np.arange(1,len(neg_df)+1)
             
             for lowerbound, upperbound in zip(lowerbounds, upperbounds):
-                pos_df[f'thres_{upperbound}'] = np.cumsum(((pos_df[f'dV_normed_{day}'] > lowerbound)&(pos_df[f'dV_normed_{day}'] <= upperbound) ).astype(np.int8)) + bound_dict[(lowerbound,upperbound)][day]
+                pos_df[f'thres_{upperbound}'] = np.cumsum(((pos_df[f'dV_normed_{day}'] > lowerbound)&(pos_df[f'dV_normed_{day}'] <= upperbound) ).astype(np.int8)) + bound_dict[(lowerbound,upperbound)]['S1'][day]
                 agg_df[f'P_dV_{upperbound}_S1_{day}'] = pos_df[f'thres_{upperbound}']/(pos_df[f'n_occ_{day}']+10)
                 agg_df.loc[:,[f'P_dV_{upperbound}_S1_{day}']] = agg_df.loc[:,[f'P_dV_{upperbound}_S1_{day}']].bfill().ffill()
                 
-                neg_df[f'thres_{upperbound}'] = np.cumsum(((neg_df[f'dV_normed_{day}'] > lowerbound)&(neg_df[f'dV_normed_{day}'] <= upperbound) ).astype(np.int8))
+                neg_df[f'thres_{upperbound}'] = np.cumsum(((neg_df[f'dV_normed_{day}'] > lowerbound)&(neg_df[f'dV_normed_{day}'] <= upperbound) ).astype(np.int8))+ bound_dict[(lowerbound,upperbound)]['S0'][day]
                 agg_df[f'P_dV_{upperbound}_S0_{day}'] = neg_df[f'thres_{upperbound}']/(neg_df[f'n_occ_{day}'])
                 agg_df.loc[:,[f'P_dV_{upperbound}_S0_{day}']] = agg_df.loc[:,[f'P_dV_{upperbound}_S0_{day}']].bfill().ffill()
             
@@ -191,11 +231,12 @@ class BayesianLabeler:
     def output(self):
         agg_df, label_df = self.agg_df, self.label_df
         agg_df, feature_list = self.get_integral_features(agg_df, self.data_features, self.mode)
+        agg_df, feature_list = self.get_nonzero_min(agg_df, feature_list)
         
         sub_df,rolling_mean,rolling_std,rolling_max = self.get_running_features(agg_df, feature_list, self.window_length)
         weather_label = self.get_weather_label(sub_df,rolling_mean,rolling_std,rolling_max,self.n_std)
         agg_df['weather_label'] = weather_label.weather_label
-        agg_df = self.get_weather_normalised_dV(agg_df, self.window_length)
+        agg_df = self.get_weather_normalised_dV(agg_df, self.window_length,self.method)
         agg_df['labels'] = label_df.labels
         agg_df = self.get_conditional_probability(agg_df,self.num_days,self.bound_dict)
-        return agg_df 
+        return agg_df, rolling_mean, rolling_std, rolling_max 
