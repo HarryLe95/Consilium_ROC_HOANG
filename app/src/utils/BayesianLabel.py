@@ -10,8 +10,8 @@ class BayesianLabeler:
                  data_features:list=['ROC_VOLTAGE'],
                  mode:str='all',
                  window_length:int=30,
-                 bound_dict:dict={(0.0,0.96): {'S1':{0:7,1:2,2:1}, 'S0':{0:0,1:0,2:0}},
-                                  (0.96,0.98):{'S1':{0:3,1:6,2:5}, 'S0':{0:5,1:5,2:5}}, 
+                 bound_dict:dict={(0.0,0.96): {'S1':{0:10,1:2,2:1}, 'S0':{0:0,1:0,2:0}},
+                                  (0.96,0.98):{'S1':{0:0,1:6,2:5}, 'S0':{0:5,1:5,2:5}}, 
                                   (0.98,10):  {'S1':{0:0,1:2,2:4}, 'S0':{0:5,1:5,2:5}}},
                  method:str='exp_mean',
                  num_days:int=3,
@@ -156,6 +156,7 @@ class BayesianLabeler:
         def get_exp_mean_V(x):
             index = x.index
             sub_df = agg_df.loc[index,:]
+            sub_df = sub_df[~sub_df.minV.isnull()]
             weight = np.arange(len(sub_df))
             alpha = -2/(window_length + 1)
             weight = np.power(alpha, weight)
@@ -177,7 +178,7 @@ class BayesianLabeler:
         elif method == '10_percentile':
             mean_fn = get_10_percentile_V
             
-        agg_df['meanV']=agg_df['minV'].rolling(window=window_length).apply(mean_fn, raw=False)
+        agg_df['meanV']=agg_df['minV'].rolling(window=window_length,min_periods=int(window_length/2)).apply(mean_fn, raw=False)
         agg_df['dV'] = agg_df['minV'] - agg_df['meanV']
         agg_df['dV_normed'] = agg_df['minV']/agg_df['meanV']
         return agg_df
