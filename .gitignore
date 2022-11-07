@@ -165,6 +165,7 @@ model/
 viz/
 *.png
 **.csv
+!config/*.csv
 #Private Info
 RDP.sh
 **rdp-key**

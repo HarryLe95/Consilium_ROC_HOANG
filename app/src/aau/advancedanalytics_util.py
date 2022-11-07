@@ -1,17 +1,24 @@
 # -*- coding: utf-8 -*-
 """
-Updated on Fri June 17, 2022
+Created: 2022-09-09
 @author: Steve Lechowicz
-"""
 
+Santos Advanced Analytics 
+SandboxProductionLoop data access utilities
+
+NOTE: Santos standards mandate NO HARD-CODING of credentials in any source code.
+"""
 # Compatibility
 from __future__ import print_function
+from abc import ABC, abstractmethod
 
 # Imports
 import os
 import io
+import ast
 import boto3
 import pandas as pd
+from datetime import datetime
 from pandas import Timestamp
 import pytz
 from pytz import timezone
@@ -27,14 +34,21 @@ from sqlalchemy.exc import DatabaseError, ResourceClosedError
 from sqlalchemy.pool import NullPool
 from sqlalchemy import text
 try:
-    import advancedanalytics_access as aa
+    import utils.advancedanalytics_access as aa
+except:
+    pass
+try:
     import cx_Oracle
+except:
+    pass
+try:
     import pymssql
+except:
+    pass
+try:
     from p2 import P2ServerClient
 except:
     pass
-
-__all__ = ['AAPandaSQL', 'AAPandaSQLException', 'aasqldf']
 
 class AAPandaSQLException(Exception):
     pass
@@ -198,51 +212,7 @@ def aasqldf(query, env=None, db_uri='sqlite:///:memory:'):
     """
     return AAPandaSQL(db_uri)(query, env)
 
-def orient_and_parse(df, orient, timezone, **kwargs):
-    args_ts = []
-    if 'args_ts' in kwargs:
-        args_ts = kwargs['args_ts']
-    for c in df.columns:
-        try:
-            df[c] = df[c].replace({'None' : None})
-            df[c] = df[c].replace({'nan' : None})
-        except TypeError:
-            pass
-    if orient == 'records':
-        recs = df.to_dict(orient=orient)
-        if len(args_ts) > 0:
-            for i, r in enumerate(recs):
-                for c in args_ts:
-                    if c not in r:
-                        continue
-                    if pd.isnull(r[c]) is False:
-                        if timezone is not None:
-                            recs[i][c] = dateutil.parser.parse(r[c]).replace(tzinfo=timezone)
-                        else:
-                            recs[i][c] = dateutil.parser.parse(r[c])
-        return recs
-    elif orient == 'list':
-        recs = df.to_dict(orient=orient)
-        for c in args_ts:
-            if c not in recs:
-                continue
-            if timezone is not None:
-                recs[c] = [dateutil.parser.parse(rv).replace(tzinfo=timezone) if pd.isnull(rv) is False else rv for rv in recs[c]]
-            else:
-                recs[c] = [dateutil.parser.parse(rv) if pd.isnull(rv) is False else rv for rv in recs[c]]
-        return recs
-    else:
-        for c in args_ts:
-            if c not in df.columns:
-                continue
-            if timezone is not None:
-                df[c] = pd.to_datetime(df[c])
-                df[c] = df[c].dt.tz_localize('UTC').dt.tz_convert(timezone)
-            else:
-                df[c] = pd.to_datetime(df[c])
-        return df
-
-def _connect_(info, connection_type=None):
+def aauconnect_(info, connection_type=None):
     if connection_type is None:
         connection_type = info['connection_type']
     # creates a connection to a data source / dest via the aau utility functions
@@ -261,8 +231,136 @@ def _connect_(info, connection_type=None):
         con = SQLServer(info)
     return con
 
-# P2 Connection Class
-class P2Connection:
+class AAUConnection(ABC):
+    def __init__(self, info):
+        super().__init__()
+        self.info = info
+        self.client = None
+        _ = self._connect_()
+
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_value, traceback):
+        if self.client is not None:
+            try:
+                self.client.close()
+                self.client = None
+            except:
+                pass
+
+    def __repr__(self):
+        return 'advancedanalytics_util.Connection(%r)' % (self.info)
+
+    def __str__(self):
+        return 'AAUConnection: [INFO=%s]' % (self.info)
+
+    def _error_handler_(self, error, do_raise):
+        if do_raise:
+            raise error
+        else:
+            print(error)
+
+    @abstractmethod
+    def _connect_(self, do_raise=True):
+        pass
+            
+    def reconnect(self):
+        return self._connect_()
+
+    @abstractmethod
+    def read(self, sql=None, args={}, edit=[], orient='list', do_raise=True, **kwargs):
+        pass
+
+    @abstractmethod
+    def write(self, sql=None, args=[], edit=[], do_raise=True, **kwargs):
+        pass
+    
+    @abstractmethod
+    def write_many(self, sql, args=[], edit=[], do_raise=True, **kwargs):
+        pass
+
+    def orient_and_parse(self, df, orient, timezone, **kwargs):
+        args_ts = []
+        if 'args_ts' in kwargs:
+            args_ts = kwargs['args_ts']
+        for c in df.columns:
+            try:
+                df[c] = df[c].replace({'None' : None})
+                df[c] = df[c].replace({'nan' : None})
+            except TypeError:
+                pass
+        if orient == 'records':
+            recs = df.to_dict(orient=orient)
+            if len(args_ts) > 0:
+                for i, r in enumerate(recs):
+                    for c in args_ts:
+                        if c not in r:
+                            continue
+                        if pd.isnull(r[c]) is False and type(r[c]) not in [pd.Timestamp, datetime]:
+                            if timezone is not None:
+                                recs[i][c] = dateutil.parser.parse(r[c]).replace(tzinfo=timezone)
+                            else:
+                                recs[i][c] = dateutil.parser.parse(r[c])
+            return recs
+        elif orient == 'list':
+            recs = df.to_dict(orient=orient)
+            for c in args_ts:
+                if c not in recs:
+                    continue
+                if timezone is not None:
+                    recs[c] = [dateutil.parser.parse(rv).replace(tzinfo=timezone) if pd.isnull(rv) is False else rv for rv in recs[c]]
+                else:
+                    recs[c] = [dateutil.parser.parse(rv) if pd.isnull(rv) is False else rv for rv in recs[c]]
+            return recs
+        elif orient == 'config':
+            config = {}
+            recs = df.to_dict(orient='records')
+            for rec in recs:
+                key = rec['KEY']
+                val = rec['VALUE']
+                if val == 'nan' or val == '' or val is None:
+                    config[key] = None
+                    continue
+                val = str(val)
+                vtype = rec['TYPE']
+                if vtype == 'range':
+                    r = []
+                    for a, b in re.findall(r'(\d+)-?(\d*)', val):
+                        r.extend(range(int(a), int(a)+1 if b=='' else int(b)+1))
+                    if len(r) > 0:
+                        config[key] = r[:-1]
+                elif vtype == 'dict':
+                    config[key] = ast.literal_eval(val)
+                elif vtype in ['datetime','date']:
+                    config[key] = dateutil.parser.parse(val)
+                elif vtype == 'str':
+                    config[key] = val
+                elif vtype == 'list':
+                    config[key] = ast.literal_eval(val)
+                elif vtype == 'float':
+                    config[key] = float(val)
+                elif vtype == 'int':
+                    config[key] = int(val)
+                elif vtype == 'bool':
+                    config[key] = ast.literal_eval(val)
+                else:
+                    raise ValueError(f'Invalid config type: {vtype}')
+                    return None
+            return config
+        else:
+            for c in args_ts:
+                if c not in df.columns:
+                    continue
+                if timezone is not None:
+                    df[c] = pd.to_datetime(df[c])
+                    df[c] = df[c].dt.tz_localize('UTC').dt.tz_convert(timezone)
+                else:
+                    df[c] = pd.to_datetime(df[c])
+            return df
+
+# P2 Connection Subclass
+class P2Connection(AAUConnection):
     """
     P2 Wrapper
     Usage: 
@@ -271,20 +369,6 @@ class P2Connection:
     @param info  <dict>: P2 Server url
 
     """
-    def __init__(self, info):
-        self.info = info
-        _ = self._connect_()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        if self.client is not None:
-            try:
-                self.client.close()
-                self.client = None
-            except:
-                pass
 
     def __repr__(self):
         return 'advancedanalytics_util.P2Connection(%r)' % (self.info)
@@ -302,16 +386,6 @@ class P2Connection:
         except Exception as e:
             self._error_handler_(e, do_raise)
         return False
-
-    def _error_handler_(self, error, do_raise):
-        if do_raise:
-            raise error
-        else:
-            print(error)
-            
-    def reconnect(self):
-        result = self._connect_()
-        return result
 
     def read(self, sql=None, args={}, edit=[], orient='list', do_raise=True, **kwargs):
         """
@@ -360,9 +434,9 @@ class P2Connection:
                 df = df.loc[df['CONF'] == 100]
                 df = df.where(df.notnull(), None)
                 if sql is None:
-                    data[i] = orient_and_parse(df, orient, timezone, **kwargs)
+                    data[i] = self.orient_and_parse(df, orient, timezone, **kwargs)
                 else:
-                    df = orient_and_parse(df, 'df', timezone, **kwargs)
+                    df = self.orient_and_parse(df, 'df', timezone, **kwargs)
                     locals()[dfns[i]] = df
             if sql is None:
                 return data
@@ -370,7 +444,7 @@ class P2Connection:
             self._error_handler_(e, do_raise)
         locals()['sql_params'] = args
         df = aasqldf(sql.format(*edit), locals())
-        return orient_and_parse(df, orient, timezone, **kwargs)
+        return self.orient_and_parse(df, orient, timezone, **kwargs)
     
     def write(self, sql, args=[], edit=[], do_raise=True, **kwargs):
         return
@@ -386,7 +460,7 @@ class P2(P2Connection):
         return 'advancedanalytics_util.P2(%r)' % (self.info)
 
 # CSV/Parquet Connection Class
-class FileConnection:
+class FileConnection(AAUConnection):
     """
     File Connection Wrapper
     Usage: 
@@ -395,15 +469,6 @@ class FileConnection:
     @param info  <dict>: File info
     
     """
-    def __init__(self, info):
-        self.info = info
-        _ = self._connect_()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.info = None
 
     def __repr__(self):
         return 'advancedanalytics_util.FileConnection(%r)' % (self.info)
@@ -413,6 +478,7 @@ class FileConnection:
 
     def _connect_(self):
         """
+        Connect to File
         """
         if 'tzname' in self.info:
             if self.info['tzname'] in ['UTC', 'utc', 'GMT', 'gmt']:
@@ -423,21 +489,9 @@ class FileConnection:
                 self.timezone = None
         else:
             self.timezone = None
-
         if 'do_raise' not in self.info:
             self.info['do_raise'] = True
-
         return True
-
-    def _error_handler_(self, error, do_raise):
-        if do_raise:
-            raise error
-        else:
-            print(error)
-            
-    def reconnect(self):
-        result = self._connect_()
-        return result
 
     def get_files(self, path, prefix=None):
         flist = []
@@ -489,7 +543,7 @@ class FileConnection:
                 fp = self.info['file']
 
         if fp is None or not os.path.isfile(fp):
-            self._error_handler_(ValueError('File Connection - invalid file path'), do_raise)
+            self._error_handler_(ValueError(f'File Connection - invalid file path: {fp}'), do_raise)
             return None
 
         if 'engine' in kwargs:
@@ -511,18 +565,18 @@ class FileConnection:
             return None
 
         if sql is None:
-            return orient_and_parse(df, orient, self.timezone, **kwargs)
+            return self.orient_and_parse(df, orient, self.timezone, **kwargs)
         try:
             if 'colnames' in kwargs and len(kwargs['colnames']) > 0:
                 cols = kwargs['colnames']
                 df.columns = cols
             tbl = kwargs['src_table']
-            locals()[tbl] = orient_and_parse(df, 'df', self.timezone, **kwargs)
+            locals()[tbl] = self.orient_and_parse(df, 'df', self.timezone, **kwargs)
         except Exception as e:
             self._error_handler_(e, do_raise)
         locals()['sql_params'] = args
         df = aasqldf(sql.format(*edit), locals())
-        result = orient_and_parse(df, orient, self.timezone, **kwargs)
+        result = self.orient_and_parse(df, orient, self.timezone, **kwargs)
         return result
 
     def write(self, sql=None, args=[], edit=[], do_raise=True, **kwargs):
@@ -597,7 +651,7 @@ class FileConnection:
                 else:
                     locals()['dst_data'] = args
                 data = aasqldf(sql.format(*edit), locals())
-                data = orient_and_parse(data, 'df', None, **kwargs)
+                data = self.orient_and_parse(data, 'df', None, **kwargs)
                 if fp.endswith('parquet'):
                     pqt = data.to_parquet(path=fp, engine='auto', compression='snappy', index=False, partition_cols=None)
                 elif fp.endswith('csv'):
@@ -627,7 +681,7 @@ class File(FileConnection):
         return 'advancedanalytics_util.File(%r)' % (self.info)
 
 # AWS S3 Connection Class
-class S3Connection:
+class S3Connection(AAUConnection):
     """
     AWS S3 Wrapper
     Usage: 
@@ -636,12 +690,6 @@ class S3Connection:
     @param bucket  <str>: s3 bucket name
     @param usr     <str>: user
     """
-    def __init__(self, info):
-        self.info = info
-        _ = self._connect_()
-
-    def __enter__(self):
-        return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         try:
@@ -668,7 +716,6 @@ class S3Connection:
                 self.timezone = None
         else:
             self.timezone = None
-
         if self.info['user'] is None:
             self.session = None
             self.s3 = boto3.resource('s3', region_name=self.info['region'])
@@ -694,19 +741,10 @@ class S3Connection:
                 self.session = None
                 self.s3 = None
                 self.client = None
-
-    def _error_handler_(self, error, do_raise):
-        if do_raise:
-            raise error
-        else:
-            print(error)
-            
-    def reconnect(self):
-        self._connect_()
         if self.s3 is None or self.client is None:
             return False
         return True
-    
+
     def get_buckets(self, name, pathfilter=[]):
         blist = []
         if self.s3 is None:
@@ -804,18 +842,18 @@ class S3Connection:
             return None
 
         if sql is None:
-            return orient_and_parse(df, orient, self.timezone, **kwargs)
+            return self.orient_and_parse(df, orient, self.timezone, **kwargs)
         try:
             if 'colnames' in kwargs and len(kwargs['colnames']) > 0:
                 cols = kwargs['colnames']
                 df.columns = cols
             tbl = kwargs['src_table']
-            locals()[tbl] = orient_and_parse(df, 'df', self.timezone, **kwargs)
+            locals()[tbl] = self.orient_and_parse(df, 'df', self.timezone, **kwargs)
         except Exception as e:
             self._error_handler_(e, do_raise)
         locals()['sql_params'] = args
         df = aasqldf(sql.format(*edit), locals())
-        return orient_and_parse(df, orient, self.timezone, **kwargs)
+        return self.orient_and_parse(df, orient, self.timezone, **kwargs)
 
     def write(self, sql=None, args=[], edit=[], do_raise=True, **kwargs):
         """
@@ -928,7 +966,7 @@ class S3(S3Connection):
         return 'advancedanalytics_util.S3(%r)' % (self.info)
 
 # Real Time Simulator Connection Class
-class RTSConnection:
+class RTSConnection(AAUConnection):
     """
     RTS Wrapper
     Usage: 
@@ -937,13 +975,6 @@ class RTSConnection:
     @param info  <dict>: File info to use to emulate streaming data source
     
     """
-    def __init__(self, info):
-        self.info = info
-        _ = self._connect_()
-
-    def __enter__(self):
-        return self
-
     def __exit__(self, exc_type, exc_value, traceback):
         for v in self.info:
             if v['reader'] is not None:
@@ -955,12 +986,6 @@ class RTSConnection:
 
     def __str__(self):
         return 'RTSConnection: [INFO=%s]' % (self.info)
-
-    def _error_handler_(self, error, do_raise):
-        if do_raise:
-            raise error
-        else:
-            print(error)
 
     def get_files(self, info):
         flist = []
@@ -1020,10 +1045,6 @@ class RTSConnection:
             else:
                 i['reader'] = self.get_reader(fp, read_size=i['read_size'])
         return True
-
-    def reconnect(self):
-        result = self._connect_()
-        return result
 
     def read(self, sql, args={}, edit=[], orient='list', do_raise=True, **kwargs):
         """
@@ -1108,10 +1129,10 @@ class RTSConnection:
                 if endoffiles is True:
                     return None
                 df = edf
-            locals()[i['src_table']] = orient_and_parse(df, 'df', timezone, **kwargs)
+            locals()[i['src_table']] = self.orient_and_parse(df, 'df', timezone, **kwargs)
         locals()['sql_params'] = args
         df = aasqldf(sql.format(*edit), locals())
-        return orient_and_parse(df, orient, None, **kwargs)
+        return self.orient_and_parse(df, orient, None, **kwargs)
 
     def write(self, sql, args=[], edit=[], do_raise=True, **kwargs):
         return
@@ -1127,7 +1148,7 @@ class RTS(RTSConnection):
         return 'advancedanalytics_util.RTS(%r)' % (self.info)
 
 # Oracle Database Connection Class
-class OracleDatabaseConnection:
+class OracleDatabaseConnection(AAUConnection):
     """
     Oracle Database Wrapper
     Usage: 
@@ -1140,11 +1161,16 @@ class OracleDatabaseConnection:
     def __init__(self, info):
         self.info = info
         self.con = None
+        # This is the path to the ORACLE client files
+        lib_dir = r"C:\Oracle\client_x64\instantclient_21_6"
+        if 'lib_dir' in info and len(info['lib_dir']) > 0:
+            lib_dir = info['lib_dir']
+        try:
+            cx_Oracle.init_oracle_client(lib_dir=lib_dir)
+        except:
+            pass
         _ = self._connect_()
         self.sets = dict(blob=cx_Oracle.BLOB, timestamp=cx_Oracle.TIMESTAMP)
-
-    def __enter__(self):
-        return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self.con is not None:
@@ -1174,16 +1200,6 @@ class OracleDatabaseConnection:
         except Exception as e:
             self._error_handler_(e, do_raise)
         return False
-
-    def _error_handler_(self, error, do_raise):
-        if do_raise:
-            raise error
-        else:
-            print(error)
-            
-    def reconnect(self):
-        result = self._connect_()
-        return result
 
     def _prepare_file_(self, cur, args, content):
         """
@@ -1284,6 +1300,19 @@ class OracleDatabaseConnection:
         if self.con is None:
             raise ValueError('Oracle Connection is None')
             return None
+        timezone = None
+        if 'timezone' in kwargs:
+            tzname = kwargs['timezone']
+            if tzname in ['UTC', 'utc', 'GMT', 'gmt']:
+                timezone = pytz.UTC
+            elif tzname is not None and len(tzname) > 0:
+                timezone = timezone(tzname)
+        elif 'timezone' in self.info:
+            tzname = self.info['timezone']
+            if tzname in ['UTC', 'utc', 'GMT', 'gmt']:
+                timezone = pytz.UTC
+            elif tzname is not None and len(tzname) > 0:
+                timezone = timezone(tzname)
         cur = self.con.cursor()
         try:
             cur.execute(sql.format(*edit), args)
@@ -1298,13 +1327,8 @@ class OracleDatabaseConnection:
                 else:
                     df = pd.DataFrame(columns=head)
                     return df
-            if orient == 'records':
-                return [dict(zip(head, t)) for t in zip(*data)]
-            elif orient == 'list':
-                return dict(zip(head, data))
-            else:
-                df = pd.DataFrame(dict(zip(head, data)))
-                return df
+            df = pd.DataFrame(dict(zip(head, data)))
+            return self.orient_and_parse(df, orient, timezone, **kwargs)
         except cx_Oracle.DatabaseError as e:
             cur.close()
             self._error_handler_(e, do_raise)
@@ -1399,7 +1423,7 @@ class ODBC(OracleDatabaseConnection):
         return 'advancedanalytics_util.ODBC(%r, %r)' % (self.db, self.usr)
         
 # SQL Server Database Connection Class            
-class SQLServerDatabaseConnection: # This is not compatible with multithreading.
+class SQLServerDatabaseConnection(AAUConnection): # This is not compatible with multithreading.
     """
     SQLServer Database Wrapper
     Usage:
@@ -1410,13 +1434,6 @@ class SQLServerDatabaseConnection: # This is not compatible with multithreading.
     @param sid <str>: Service identifier
     @param usr <str>: Database user
     """
-
-    def __init__(self, info):
-        self.info = info
-        _ = self._connect_()
-
-    def __enter__(self):
-        return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self.con is not None:
@@ -1444,20 +1461,23 @@ class SQLServerDatabaseConnection: # This is not compatible with multithreading.
             self._error_handler_(e, do_raise)
         return False
 
-    def _error_handler_(self, error, do_raise):
-        if do_raise:
-            raise error
-        else:
-            print(error)
-            
-    def reconnect(self):
-        result = self._connect_()
-        return result
-
     def read(self, sql, args=(), edit=[], orient='list', do_raise=True, **kwargs):
         if self.con is None:
             raise ValueError('SQL Connection is None')
             return None
+        timezone = None
+        if 'timezone' in kwargs:
+            tzname = kwargs['timezone']
+            if tzname in ['UTC', 'utc', 'GMT', 'gmt']:
+                timezone = pytz.UTC
+            elif tzname is not None and len(tzname) > 0:
+                timezone = timezone(tzname)
+        elif 'timezone' in self.info:
+            tzname = self.info['timezone']
+            if tzname in ['UTC', 'utc', 'GMT', 'gmt']:
+                timezone = pytz.UTC
+            elif tzname is not None and len(tzname) > 0:
+                timezone = timezone(tzname)
         try:
             cur = self.con.cursor()
             cur.execute(sql.format(*edit), args)
@@ -1472,13 +1492,8 @@ class SQLServerDatabaseConnection: # This is not compatible with multithreading.
                 else:
                     df = pd.DataFrame(columns=head)
                     return df
-            if orient == 'records':
-                return [dict(zip(head, t)) for t in zip(*data)]
-            elif orient == 'list':
-                return dict(zip(head, data))
-            else:
-                df = pd.DataFrame(dict(zip(head, data)))
-                return df
+            df = pd.DataFrame(dict(zip(head, data)))
+            return self.orient_and_parse(df, orient, timezone, **kwargs)
         except pymssql.DatabaseError as e:
             cur.close()
             self._error_handler_(e, do_raise)
@@ -1555,3 +1570,5 @@ class MSSQL(SQLServerDatabaseConnection):
     """
     def __repr__(self):
         return 'advancedanalytics_util.MSSQL(%r, %r, %r, %r)' % (self.srv, self.db, self.sid, self.usr)  
+
+

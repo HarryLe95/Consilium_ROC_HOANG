@@ -1,0 +1,12 @@
+KEY,VALUE,TYPE
+application_name,'ROC Config',str
+cfg_s3_info,"{'connection_type' : 's3',
+              'user'   : None,
+              'region' : 'ap-southeast-2',
+              'bucket' : 'aa-roc-model-1-task0355600-poc-syd-174396275689'}",dict
+
+
+                
+                
+                
+

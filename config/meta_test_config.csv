@@ -1,0 +1,19 @@
+KEY,VALUE,TYPE
+all_wells,"['ACRUS1', 'BIGL22', 'MOOM115', 'POND1', 'POND11', 'POND14', 'POND16', 'PSYC3', 'PSYC7', 'TIRRA80', 'TIRRA88', 'TIRRA91', 'TIRRA93', 'TIRRW1', 'TOOL29', 'WELTN1', 'WIPPOS1', 'WKT3', 'YAN1L', 'YAN2L', 'YAN2U', 'YAN4U', 'YAN8L']",list
+test_wells,['POND1'],list
+features,"['ROC_VOLTAGE', 'FLOW', 'Mask_ROC_VOLTAGE', 'Mask_FLOW']",list
+num_days,7,int
+normalise_mode,all,str
+base_lr,5e-05,float
+early_stopping_patience,15,int
+reduce_lr_patience,7,int
+label_mapping,"{1: 0, 2: 1, 3: 0, 4: 0, 5: 1}",dict
+drop_labels,"[0, 6, 7, 8, 9]",list
+batch_size,32,int
+optimiser,adam,str
+num_epochs,100,int
+metrics,"['acc', 'iou']",list
+use_pretrain,True,bool
+pretrain_model,my_model,str
+save_model,False,bool
+save_name,my_model,str

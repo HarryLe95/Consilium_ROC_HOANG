@@ -5,7 +5,7 @@ from   datetime import datetime as datetime
 
 import pandas as pd 
 import numpy as np 
-import yaml
+
 from geopy import distance 
 from sklearn.preprocessing import StandardScaler
 
@@ -28,7 +28,7 @@ class S3ROCManager(S3Manager):
     In summary, there are three types of ROC data that S3ROCManager handles
     - processed_data: raw ROC data from battery sensors containing ROC_VOLTAGE, FLOW, PRESSTURE_TH and their repective mask and corresponding timestamp.
     - weather_data: raw data from weather stations, with features including cloudcover, radiations, and corresponding timestamp.
-    - labelled_data: csv data that is a combination of processed_data, weather_data, and manual labels stored in a yaml config file. 
+    - labelled_data: csv data that is a combination of processed_data, weather_data, and manual labels stored in a csv config file. 
 
     For convenience, file paths, prefixes, file_extension and related S3 keywords are stored in processed_data_dict and solar_data_dict. 
 
@@ -40,22 +40,20 @@ class S3ROCManager(S3Manager):
         self.info = info 
         self.init_processed_data()
         self.init_solar_data()
+        self.init_label_data()
 
-        if not Path.config("nearest_station.yaml").exists():
+
+        self.all_labelled_wells = list(self.label_dict.keys())
+        if not Path.config("nearest_station.csv").exists():
             self.nearest_station = self.get_nearest_station()
         else:
-            with open(Path.config("nearest_station.yaml"),'r') as file:
-                self.nearest_station = yaml.safe_load(file)
-        self.all_labelled_wells = list(self.nearest_station.keys())
+            self.nearest_station = Path.read_config("nearest_station.csv")
         self.all_stations = list(set(self.nearest_station.values()))
 
     def init_label_data(self):
-        with open(Path.config("well_labels.yaml"),'r') as file:
-            self.label_dict = yaml.safe_load(file)
+        self.label_dict = Path.read_config("well_labels.csv")
 
-    def get_well_label_count(self):
-        self.init_label_data()
-        
+    def get_well_label_count(self):        
         def get_label_count(x):
             value = list(x)
             count = {i:0 for i in range(10)}
@@ -159,11 +157,9 @@ class S3ROCManager(S3Manager):
             dict: final_df containing the name of the nearest col for each row.
         """ 
         final_df = distance_df.idxmin(axis='columns')
-
-        with open(Path.config("nearest_station.yaml"),'w') as file:
-            yaml.dump(final_df.to_dict(), file)
-
-        return final_df.to_dict()
+        data = final_df.to_dict()
+        Path.write_config(data,'nearest_station.csv')
+        return data
     
     def get_nearest_station(self, 
                              well_location:str='well_location.csv', 
@@ -178,7 +174,6 @@ class S3ROCManager(S3Manager):
         Returns:
             dict: nearest station dictionary 
         """
-        self.init_label_data()
         well_loc = self.get_well_location(well_location)
         station_loc = self.get_station_location(station_location)
         target_wells = target_wells if target_wells is not None else self.all_labelled_wells 
@@ -361,7 +356,7 @@ class S3ROCManager(S3Manager):
                    nan_replace_method:str='interpolate',
                    raw_csv:str|pd.DataFrame=None,
                    weather_csv:str|pd.DataFrame=None,
-                   label_config:str='well_labels.yaml',
+                   label_config:str='well_labels.csv',
                    window_size:int=6,
                    to_pickle:bool=False) -> pd.DataFrame:
         """Read and combine raw sensor, raw weather data, and labels.
@@ -379,7 +374,7 @@ class S3ROCManager(S3Manager):
             nan_replace_method (str, optional): method to replace nan in raw data. One of 'interpolate','zero'. Defaults to 'interpolate'.
             raw_csv (str | pd.DataFrame, optional): raw_df. If provided, will read raw_df from local storage. If None, will use read_processed_data to read from S3. Defaults to None.
             weather_csv (str | pd.DataFrame, optional): weather df. If provided, will read weather_df from local storage. If None, will use read_solar to read from S3. Defaults to None.
-            label_config (str, optional): yaml file containing file labels. Defaults to 'well_labels.yaml'.
+            label_config (str, optional): csv file containing file labels. Defaults to 'well_labels.csv'.
             window_size (int, optional): window sequence length - determines the number of previous day to pool in forming feature. Defaults to 6.
             to_pickle (bool, optional): whether to save data locally. Defaults to False.
 
@@ -419,8 +414,7 @@ class S3ROCManager(S3Manager):
         daily_weather_df.index = pd.to_datetime(daily_weather_df.index)
 
         #Prepare labels from label_config
-        with open(Path.config(label_config),'r') as file:
-            label = yaml.safe_load(file)[well_code]
+        label = Path.read_config(label_config)
         
         label_df = pd.DataFrame({"TS": label.keys(), "labels": label.values()})
         label_df.set_index("TS",inplace=True)
@@ -474,8 +468,7 @@ class S3ROCManager(S3Manager):
                 voltage[well]=24
             else:
                 voltage[well]=12
-        with open(Path.config("well_type.yaml"),'w') as file:
-            yaml.dump(voltage, file, default_flow_style=False)
+        Path.write_config(voltage,'well_type.csv')
         return voltage
 
     def calculate_weather_transform_params(self):
@@ -500,8 +493,7 @@ class S3ROCManager(S3Manager):
             all_weather[feature]['var']=float(scaler.var_[0])
             all_weather[feature]['scale']=float(scaler.scale_[0])
         weather_param_dict = {'one': weather, 'all': all_weather}
-        with open(Path.config("station_transform_params.yaml"),'w') as file:
-            yaml.dump(weather_param_dict, file, default_flow_style=False)
+        Path.write_config(weather_param_dict, "station_transform_params.csv")
         return weather_param_dict
 
     def calculate_well_transform_params(self):
@@ -509,11 +501,10 @@ class S3ROCManager(S3Manager):
         all_df = {12:[], 24: []}
         all_well_params = {12:{}, 24: {}}
 
-        if not Path.config("well_type.yaml").exists():
+        if not Path.config("well_type.csv").exists():
             voltage_type = self.classify_voltage_type()
         else:
-            with open(Path.config("well_type.yaml"),'r') as file:
-                voltage_type = yaml.safe_load(file)
+            voltage_type = Path.read_config("well_type.csv")
 
         for well in self.all_labelled_wells:
             well_params[well]={feature:{} for feature in well_features}
@@ -543,6 +534,5 @@ class S3ROCManager(S3Manager):
                 all_well_params[v][feature]['scale']=float(scaler.scale_[0])
 
         well_param_dict = {'one': well_params, 'all': all_well_params}
-        with open(Path.config("well_transform_params.yaml"),'w') as file:
-            yaml.dump(well_param_dict, file, default_flow_style=False)
+        Path.write_config(well_param_dict, "well_transform_params.csv")
         return well_param_dict, all_df

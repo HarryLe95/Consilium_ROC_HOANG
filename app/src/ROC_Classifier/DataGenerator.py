@@ -1,7 +1,6 @@
 from src.utils.PathManager import Paths as Path 
 from src.utils.Data import  get_combined_data, get_random_split_from_image_label, get_combined_regression_data
 from typing import Sequence 
-import yaml 
 import tensorflow as tf 
 import numpy as np
 import logging 
@@ -29,17 +28,13 @@ class ROC_Generator:
     Attributes:
         self.dataset(tf.data.Dataset|tuple[tf.data.Dataset, tf.data.Dataset]): one dataset or a training/validation dataset pair.
     """
-    with open(Path.config("well_transform_params.yaml"),'r') as file:
-        well_params_config = yaml.safe_load(file)
+    well_params_config = Path.read_config("well_transform_params.csv")
 
-    with open(Path.config("well_type.yaml"),'r') as file:
-        well_type_config = yaml.safe_load(file)
+    well_type_config = Path.read_config("well_type.csv")
 
-    with open(Path.config("station_transform_params.yaml"),'r') as file:
-        station_params_config = yaml.safe_load(file)
+    station_params_config = Path.read_config("station_transform_params.csv")
 
-    with open(Path.config("nearest_station.yaml"),'r') as file:
-        nearest_station_config = yaml.safe_load(file)
+    nearest_station_config = Path.read_config("nearest_station.csv")
     
     def __init__(self, 
                  wells: str|Sequence[str], 

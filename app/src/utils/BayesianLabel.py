@@ -30,8 +30,7 @@ class BayesianLabeler:
         
     @staticmethod 
     def get_data(well_cd):
-        with open(Path.config("nearest_station.yaml"),'r') as file:
-            station_dict = yaml.safe_load(file)
+        station_dict = Path.read_config("nearest_station.csv")
 
         station_name = station_dict[well_cd]
         try:

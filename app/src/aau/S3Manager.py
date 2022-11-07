@@ -1,5 +1,6 @@
 from src.aau.advancedanalytics_util import S3
 from pathlib import Path
+from src.utils.PathManager import Paths 
 from datetime import datetime  
 import pandas as pd
 from botocore.errorfactory import ClientError
@@ -15,6 +16,12 @@ class S3Manager(S3):
     Args:
         S3 (_type_): advancedanalytics_utils.py S3 class 
     """
+    @classmethod 
+    def from_config(cls,config_path:str='config.csv'):
+        config_file = Paths.read_config(config_path)
+        info = config_file['cfg_s3_info']
+        return cls(info)
+    
     def __init__(self, info:dict):
         super().__init__(info)
         if 'bucket' in info:
