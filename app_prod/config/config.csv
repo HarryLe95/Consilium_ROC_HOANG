@@ -1,0 +1,298 @@
+KEY,VALUE,TYPE
+application_name,BDTA,str
+run_mode,live,str
+bdta_runstart_timezone,34200,int
+bdta_timezone,Australia/Adelaide,str
+backfill_run,20220101,datetime
+storelastts,True,bool
+ignorelastts,True,bool
+maxruntime_seconds,21600,int
+perform_model_training,False,bool
+perform_model_inference,True,bool
+is_validation,False,bool
+load_inference_model_path,C:/Users/Administrator/Desktop/Consilium-BDTA/model/20220405_073724-Model/model.h5,str
+loss_beta,0.2,float
+initial_learning_rate,0.1,float
+feature_tags,"['FLOW_LN','PRES_LN','PRES_TH','TEMP_LN']",list
+inference_path,C:/Users/Administrator/Desktop/Consilium-BDTA/inference,str
+inference_window_size,4096,int
+binary_threshold,0.9,float
+perform_err_correction,False,bool
+perform_interpolation,True,bool
+interpolation_forward_limit,60,int
+interpolation_method,linear,str
+perform_normalisation,True,bool
+perform_fillna,True,bool
+plot_parameters,"{'down_sample_factor': 60, 'inference_subplot_titles': ['Current System Prediction', 'New System Prediction'], 'training_subplot_titles': ['Engineering QC (Rory)', 'Current System Prediction', 'New System Prediction']}",dict
+fillna_value,-0.1,float
+AVERAGE_BEHAVIOUR,None,str
+RAW_EVENT_MINIMUM,5.0,float
+COMBINE_THRESHOLD,60.0,float
+COMBINED_EVENT_MINIMUM,20.0,float
+default_group_ids,"[0]",list
+group_info,"{'connection_type' : 'file', 
+			'path' : 'C:/Users/Administrator/Desktop/Consilium-BDTA/app/config/bdta',
+			'file' : 'BDTA_MODEL_GROUP.csv', 
+			'partition_mode' : None}",dict
+group_sql,"SELECT * FROM BDTA_MODEL_GROUP WHERE GROUP_ID = :GROUP_ID",str
+group_kwargs,"{'src_table': 'BDTA_MODEL_GROUP', 
+			'file': 'BDTA_MODEL_GROUP.csv', 
+			'args_ts': ['TSTART']}",dict
+input_data_info,"{'connection_type' : 'file', 
+				 'path' : 'C:/Users/Administrator/Desktop/Consilium-BDTA/app/tests/data'}",dict
+output_data_info,"{'connection_type' : 'file', 
+					'path' : 'C:/Users/Administrator/Desktop/Consilium-BDTA/app/tests/output'}",dict
+meta_data_info,"{'connection_type' : 'file', 
+				 'path' : 'C:/Users/Administrator/Desktop/Consilium-BDTA/app/tests/data'}",dict
+tag_data_info,"{'connection_type': 'file', 
+				'path' : 'C:/Users/Administrator/Desktop/Consilium-BDTA/app/tests/data',
+				'partition_mode' : 'month', 
+				'data_index_column' : 'TS'}",dict
+tag_data_sql,"SELECT :WELL_CD AS WELL_CD, :FLARELINE AS FLARELINE, TS, FLOW_LN, PRES_LN, PRES_TH, TEMP_LN FROM BDTA_TAG_DATA WHERE TS >= :S AND TS <= :E ORDER BY TS",str
+tag_data_kwargs,"{'args_ts' : ['TS'],
+				'src_table' : 'BDTA_TAG_DATA',
+				'data_index_column' : 'TS',
+				'partition_mode' : 'month',
+				'file_prefix' : '{}_BDTA_TAG_DATA_',
+				'file_suffix' : '.csv',
+				'file' : None}",dict
+flareline_sql,"SELECT WELL_CD,
+                       FLARELINE_TYPE AS FLARELINE,
+                       INSTALLED_DATE,
+                       REMOVED_DATE,
+                       LAST_MODIFIED_TS   
+                  FROM BDTA_METADATA_V2 WHERE WELL_CD = :WELL_CD
+				  AND LAST_MODIFIED_TS <= :E
+				  ORDER BY LAST_MODIFIED_TS DESC",str
+flareline_kwargs,"{'args_ts' : ['INSTALLED_DATE','REMOVED_DATE','LAST_MODIFIED_TS'],
+				'src_table' : 'BDTA_METADATA_V2',
+				'partition_mode' : None,
+				'file' : 'BDTA_METADATA_V2.csv'}",dict
+event_history_sql,"SELECT BDTA_EVENT_NUMBER AS REF_BDTA_EVENT_NUMBER,
+					BDTA_START_TS AS EVENT_TS_MINIMUM,
+					BDTA_END_TS AS EVENT_TS_MAXIMUM,
+					BDTA_DURATION_HOURS AS REF_BDTA_DURATION_HOURS,
+					BDTA_FLAGGED_FRACTION AS REF_BDTA_FLAGGED_FRACTION,
+					QC_REVIEW_STATUS AS REF_QC_REVIEW_STATUS,
+					QC_CONFIDENCE AS REF_QC_CONFIDENCE
+					FROM BDTA_EVENT_DATA_V2 
+					WHERE WELL_CD = :WELL_CD
+					AND BDTA_START_TS >= :S
+					AND BDTA_END_TS <= :E",str
+event_history_kwargs,"{'partition_mode' : 'month',
+					'args_ts' : ['BDTA_START_TS','BDTA_END_TS','EVENT_TS_MINIMUM','EVENT_TS_MAXIMUM'],
+					'data_index_column' : 'BDTA_START_TS',
+					'src_table' : 'BDTA_EVENT_DATA_V2',
+					'file_prefix' : '{}_BDTA_EVENT_DATA_',
+					'file_suffix' : '.csv',
+					'file' : None}",dict
+load_lastevent_sql,"SELECT MAX(BDTA_EVENT_NUMBER) AS BDTA_EVENT_NUMBER FROM BDTA_EVENT_DATA_V2 WHERE WELL_CD = :WELL_CD",str
+load_lastevent_kwargs,"{'partition_mode' : 'month',
+					'data_index_column' : 'BDTA_START_TS',
+					'src_table' : 'BDTA_EVENT_DATA_V2',
+					'file_prefix' : '{}_BDTA_EVENT_DATA_',
+					'file_suffix' : '.csv',
+					'file' : None}",dict
+time_data_sql,"SELECT WELL_CD, TS FROM BDTA_TIME_DATA_V2 WHERE WELL_CD = :WELL_CD AND TS >= :S AND TS <= :E ORDER BY TS",str
+time_data_kwargs,"{'args_ts' : ['TS'],
+				'data_index_column' : 'TS',
+				'partition_mode' : 'month',
+				'src_table' : 'BDTA_TIME_DATA_V2',
+				'file_prefix' : '{}_BDTA_TIME_DATA_',
+				'file_suffix' : '.csv',
+				'file' : None}",dict
+load_resultdata_sql,"SELECT * FROM BDTA_RESULTS_V2 WHERE WELL_CD = :WELL_CD ORDER BY BDTA_END_TS DESC",str
+load_resultdata_edit,[],list
+load_resultdata_kwargs,"{'src_table' : 'BDTA_RESULTS_V2',
+					'append' : True,
+					'partition_mode' : None,
+					'args_ts' : ['BDTA_START_TS','BDTA_MID_TS','BDTA_END_TS','LAST_UPDATED'],
+					'file' : '{}_BDTA_RESULTS.csv'}",dict
+load_rundata_sql,"SELECT * FROM BDTA_RUN_DATA_V2 WHERE WELL_CD = :WELL_CD ORDER BY TS DESC",str
+load_rundata_edit,[],list
+load_rundata_kwargs,"{'src_table' : 'BDTA_RUN_DATA_V2',
+					'partition_mode' : None,
+					'args_ts' : ['TS','RUN_TSTART','RUN_TEND','BDTA_LAST_EVENT_END'],
+					'append' : True,
+					'file' : '{}_BDTA_RUN_DATA.csv'}",dict
+store_rundata_sql,"INSERT INTO BDTA_RUN_DATA_V2 (WELL_CD,TS,RUN_DATE,RUN_TSTART,RUN_TEND,BDTA_LAST_EVENT_END,BDTA_LAST_EVENT_NUMBER) VALUES (:WELL_CD,:TS,:RUN_DATE,:RUN_TSTART,:RUN_TEND,:BDTA_LAST_EVENT_END,:BDTA_LAST_EVENT_NUMBER)",str
+store_rundata_sql_update,"INSERT INTO BDTA_RUN_DATA_V2 (WELL_CD,TS,RUN_DATE,RUN_TSTART,RUN_TEND,BDTA_LAST_EVENT_END,BDTA_LAST_EVENT_NUMBER) VALUES (:WELL_CD,:TS,:RUN_DATE,:RUN_TSTART,:RUN_TEND,:BDTA_LAST_EVENT_END,:BDTA_LAST_EVENT_NUMBER)",str
+store_rundata_edit,[],list
+store_rundata_kwargs,"{'append' : False,
+						'file' : '{}_BDTA_RUN_DATA.csv',
+						'partition_mode' : None,
+						'data_index_column' : 'TS',
+						'args_ts' : ['TS','RUN_TSTART','RUN_TEND','BDTA_LAST_EVENT_END'],
+						'dst_table' : 'BDTA_RUN_DATA_V2',
+						'dst_schema' : {'WELL_CD': 'pd.Series(dtype=str)',
+										'TS': 'pd.Series(dtype=object)',
+										'RUN_DATE': 'pd.Series(dtype=object)',
+										'RUN_TSTART': 'pd.Series(dtype=object)',
+										'RUN_TEND': 'pd.Series(dtype=object)',
+										'BDTA_LAST_EVENT_END': 'pd.Series(dtype=object)',
+										'BDTA_LAST_EVENT_NUMBER' : 'pd.Series(dtype=int)'}}",dict
+store_event_sql,"INSERT INTO BDTA_EVENT_DATA_V2
+					(WELL_CD,
+					 INFRASTRUCTURE,
+					 BDTA_EVENT_NUMBER,
+					 BDTA_START_TS,
+					 BDTA_END_TS,
+					 BDTA_DURATION_HOURS,
+					 BDTA_FLAG_TYPE_MODE,
+					 BDTA_FLAGGED_FRACTION,
+					 LOW_RAW_FLAG_WARNING,
+					 THP_MEAN,
+					 THP_MEDIAN,
+					 THP_SDEV,
+					 THP_MAD,
+					 THP_MEAN_FLOWING,
+					 MEAN_THP_WARNING,
+					 START_THP_DERIV,
+					 THP_DERIV_Q1,
+					 START_THP_DERIV_WARNING,
+					 MTONIC_THP_DERIV_WARNING,
+					 START_DEPRESSURED_FLAG,
+					 LINE_PRESSURE_MEAN,
+					 LINE_PRESSURE_MEDIAN,
+					 LINE_PRESSURE_SDEV,
+					 LINE_PRESSURE_MAD,
+					 LINE_PRESSURE_MEAN_FLOWING,
+					 MODEL_RUN_TIME)
+				VALUES 
+					(:WELL_CD,
+					 :FLARELINE, 
+					 :BDTA_EVENT_NUMBER_COMBINED,
+					 :EVENT_TS_MINIMUM,
+					 :EVENT_TS_MAXIMUM,
+					 :BDTA_DURATION_HOURS,
+					 :BDTA_FLAG_TYPE_MAX,
+					 :BDTA_FLAGGED_FRACTION,
+					 :LOW_RAW_FLAG_WARNING,
+					 :THP_MEAN,
+					 :THP_MEDIAN,
+					 :THP_SDEV,
+					 :THP_MDAE,
+					 :THP_MEAN_FLOWING_MEAN,
+					 :MEAN_THP_WARNING,
+					 :THP_DERIVATIVE_MEAN_START,
+					 :THP_DERIVATIVE_FIRST_QUARTILE,
+					 :START_THP_DERIVATIVE_WARNING,
+					 :MTONIC_THP_DERIV_WARNING,
+					 :START_DEPRESSURED_FLAG,
+					 :LINE_PRESSURE_MEAN,
+					 :LINE_PRESSURE_MEDIAN,
+					 :LINE_PRESSURE_SDEV, 
+					 :LINE_PRESSURE_MDAE,
+					 :LP_MEAN_FLOWING_MEAN,
+					 :MODEL_RUN_TIME)",str
+store_event_edit,[],list
+store_event_kwargs,"{'append' : False,
+					'args_ts' : ['BDTA_START_TS','BDTA_END_TS','MODEL_RUN_TIME'],
+					'partition_mode' : 'month',
+					'data_index_column' : 'BDTA_START_TS',
+					'path' : 'C:/Users/Administrator/Desktop/Consilium-BDTA/app/tests/output',
+					'file_prefix' : '{}_BDTA_EVENT_DATA_',
+					'file_suffix' : '.csv',
+					'file' : None,
+					'dst_table' : 'BDTA_EVENT_DATA_V2',
+					'dst_schema' : {'WELL_CD': 'pd.Series(dtype=str)',
+									 'INFRASTRUCTURE': 'pd.Series(dtype=str)',
+									 'BDTA_EVENT_NUMBER': 'pd.Series(dtype=int)',
+									 'BDTA_START_TS': 'pd.Series(dtype=object)',
+									 'BDTA_END_TS': 'pd.Series(dtype=object)',
+									 'BDTA_DURATION_HOURS': 'pd.Series(dtype=float)',
+									 'BDTA_FLAG_TYPE_MODE': 'pd.Series(dtype=str)',
+									 'BDTA_FLAGGED_FRACTION': 'pd.Series(dtype=float)',
+									 'LOW_RAW_FLAG_WARNING': 'pd.Series(dtype=bool)',
+									 'THP_MEAN': 'pd.Series(dtype=float)',
+									 'THP_MEDIAN': 'pd.Series(dtype=float)',
+									 'THP_SDEV': 'pd.Series(dtype=float)',
+									 'THP_MAD': 'pd.Series(dtype=float)',
+									 'THP_MEAN_FLOWING': 'pd.Series(dtype=float)',
+									 'MEAN_THP_WARNING': 'pd.Series(dtype=int)',
+									 'START_THP_DERIV': 'pd.Series(dtype=float)',
+									 'THP_DERIV_Q1': 'pd.Series(dtype=float)',
+									 'START_THP_DERIV_WARNING': 'pd.Series(dtype=bool)',
+									 'MTONIC_THP_DERIV_WARNING': 'pd.Series(dtype=int)',
+									 'START_DEPRESSURED_FLAG': 'pd.Series(dtype=bool)',
+									 'LINE_PRESSURE_MEAN': 'pd.Series(dtype=float)',
+									 'LINE_PRESSURE_MEDIAN': 'pd.Series(dtype=float)',
+									 'LINE_PRESSURE_SDEV': 'pd.Series(dtype=float)',
+									 'LINE_PRESSURE_MAD': 'pd.Series(dtype=float)',
+									 'LINE_PRESSURE_MEAN_FLOWING': 'pd.Series(dtype=float)',
+									 'FLOW_AVG_PRE': 'pd.Series(dtype=float)',
+									 'FLOW_AVG_POST': 'pd.Series(dtype=float)',
+									 'REVIEW_STATUS': 'pd.Series(dtype=str)',
+									 'REVIEW_COMMENT': 'pd.Series(dtype=str)',
+									 'LAST_UPDATED_BY': 'pd.Series(dtype=str)',
+									 'LAST_UPDATED': 'pd.Series(dtype=object)',
+									 'QC_REVIEW_STATUS': 'pd.Series(dtype=str)',
+									 'QC_CONFIDENCE': 'pd.Series(dtype=float)',
+									 'QC_USER_REVIEW_STATUS': 'pd.Series(dtype=str)',
+									 'LAST_QC_BY': 'pd.Series(dtype=str)',
+									 'LAST_QC_TS': 'pd.Series(dtype=object)',
+									 'MODEL_RUN_TIME': 'pd.Series(dtype=object)'}}",dict
+store_timedata_sql,"INSERT INTO BDTA_TIME_DATA_V2 
+					(WELL_CD, 
+					TS, 
+					BAD_DATA_FLAG, 
+					THP, 
+					THP_MEAN_FLOWING, 
+					FLOW, 
+					LINE_PRESSURE, 
+					BDTA_EVENT_NUMBER,
+					BDTA_FLAG, 
+					OLD_BDTA_FLAG,
+					NEW_BDTA_FLAG,
+					BDTA_FLAG_TYPE,
+					MODEL_RUN_TIME)
+				VALUES 
+					(:WELL_CD,
+					:TS,
+					:BAD_DATA_FLAG,
+					:THP,
+					:THP_MEAN_FLOWING,
+					:FLOW,
+					:LINE_PRESSURE,
+					:BDTA_EVENT_NUMBER_COMBINED,
+					:BDTA_FLAG,
+					:OLD_BDTA_FLAG,
+					:NEW_BDTA_FLAG,
+					:BDTA_FLAG_TYPE,
+					:MODEL_RUN_TIME)",str
+store_timedata_edit,[],list
+store_timedata_kwargs,"{'append' : False,
+					'args_ts' : ['TS','MODEL_RUN_TIME'],
+					'partition_mode' : 'month',
+					'data_index_column' : 'TS',
+					'path' : 'C:/Users/Administrator/Desktop/Consilium-BDTA/app/tests/output',
+					'file_prefix' : '{}_BDTA_TIME_DATA_',
+					'file_suffix' : '.csv',
+					'file' : None,
+					'dst_table' : 'BDTA_TIME_DATA_V2',
+					'dst_schema' : {'WELL_CD': 'pd.Series(dtype=str)',
+								'BDTA_EVENT_NUMBER': 'pd.Series(dtype=int)',
+								'TS': 'pd.Series(dtype=object)',
+								'BAD_DATA_FLAG': 'pd.Series(dtype=bool)',
+								'THP': 'pd.Series(dtype=float)',
+								'THP_MEAN_FLOWING': 'pd.Series(dtype=float)',
+								'FLOW': 'pd.Series(dtype=float)',
+								'LINE_PRESSURE': 'pd.Series(dtype=float)',
+								'BDTA_FLAG': 'pd.Series(dtype=bool)',
+								'OLD_BDTA_FLAG': 'pd.Series(dtype=bool)',
+								'NEW_BDTA_FLAG': 'pd.Series(dtype=bool)',
+								'BDTA_FLAG_TYPE': 'pd.Series(dtype=str)',
+								'MODEL_RUN_TIME': 'pd.Series(dtype=object)'}}",dict
+log_info,"{'connection_type' : 'file', 
+	   'partition_mode' : 'month',
+	   'data_index_column' : 'TS',
+	   'args_ts' : ['TS']
+	}",dict
+log_sql,None,str
+log_kwargs,"{'args_ts' : ['TS'],
+                'append' : True,
+				'path' : 'C:/Users/Administrator/Desktop/Consilium-BDTA/app/tests/output',
+				'file_prefix' : 'BDTA_LOG_',
+				'file_suffix' : '.csv',
+                'file' : None
+}",dict
