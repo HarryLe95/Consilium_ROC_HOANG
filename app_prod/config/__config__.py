@@ -7,7 +7,7 @@ def init():
         '_type' : 'file',
         '_info': {
             'connection_type' : 'file',
-            'path' : 'C:/Users/Administrator/Desktop/Consilium-ROC/app/config',
+            'path' : 'C:/Users/Administrator/Desktop/Consilium_ROC_HOANG/app_prod/config',
             'file' : 'config.csv',
             'partition_mode' : None
         },

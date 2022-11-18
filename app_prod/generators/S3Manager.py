@@ -185,26 +185,26 @@ class S3Manager(S3):
 
     @classmethod
     def get_filename(cls,
-                item_cd:str, 
+                well_cd:str, 
                 file_prefix:str, 
                 start:datetime|str, 
                 end:datetime|str, 
                 strp_format:str='%Y%m%d',
                 strf_format:str='%Y%m%d',
-                file_ext:str='csv') -> str:
+                file_suffix:str='.csv') -> str:
         """Get filename that adheres to Santos' naming convention
 
         Example: 
         >>> S3Manager.get_filename("MOOMBA","SOLAR_DATA","2020-01-01","2020-02-01","%Y-%m-%d")
         >>> MOOMBA_SOLAR_DATA_2020-01-01_2020_02_01.csv
         Args:
-            item_cd (str): well_cd or weather station code
+            well_cd (str): well_cd 
             file_prefix (str): file_prefix
             start (datetime | str): start date
             end (datetime | str): end date
             strp_format (str, optional): format to read start and end if given as string. Defaults to '%Y%m%d'.
             strf_format (str, optional): format suffix date in file name. Defaults to '%Y%m%d'.
-            file_ext (str, optional): file_extension. Defaults to 'csv'.
+            file_suffix (str, optional): file_suffixension. Defaults to 'csv'.
         
         Returns:
             str: formatted filename 
@@ -213,11 +213,11 @@ class S3Manager(S3):
             start = cls.parse_date(start, strp_format)
         if isinstance(end,str):
             end = cls.parse_date(end, strp_format)
-        fn = '{}_{}_{}_{}.{}'.format(item_cd, 
+        fn = '{}_{}_{}_{}{}'.format(well_cd, 
                                     file_prefix, 
                                     start.strftime(strf_format), 
                                     end.strftime(strf_format), 
-                                    file_ext)
+                                    file_suffix)
         return fn
 
     @classmethod
@@ -250,13 +250,14 @@ class S3Manager(S3):
     def read_from_storage(self,
                           path:str,
                           file_prefix: str,
-                          item_cd: str,
+                          well_cd: str,
                           start: datetime|str,
                           end: datetime|str,
+                          bucket:str=None,
+                          file_suffix:str='.csv',
                           strp_format:str='%Y-%m-%d',
                           strf_format:str='%Y%m%d',
-                          file_ext:str='csv',
-                          bucket:str=None,
+                          combine_output:bool=False,
                           **kwargs,  
                           ) -> pd.DataFrame:
         """Read and combined files on S3 storage from start to end.
@@ -264,17 +265,17 @@ class S3Manager(S3):
         Example: to read weather data for Jackson from 2018 to 2019: 
         >>> S3 = S3Manager(info)
         >>> S3.read_from_storage(bucket=MyBucket, path="ROC/SOLAR_DATA", file_prefix='SOLAR_DATA', 
-                                  item_cd = "Jackson", start="2018-01-01", end="2019-01-01")
+                                  well_cd = "Jackson", start="2018-01-01", end="2019-01-01")
         Args:
             bucket (str): bucket
             path (str): S3 path to file
             file_prefix (str): file_prefix
-            item_cd (str): item code
+            well_cd (str): item code
             start (datetime | str): start date
             end (datetime | str): end date
             strp_format (str, optional): format to intepret start and end dates. Defaults to '%Y-%m-%d'.
             strf_format (str, optional): storage file's date format . Defaults to '%Y%m%d'.
-            file_ext (str, optional): file extension. Defaults to 'csv'.
+            file_suffix (str, optional): file extension. Defaults to 'csv'.
 
         Returns:
             pd.DataFrame: combined dataframe
@@ -285,17 +286,25 @@ class S3Manager(S3):
             except: 
                 raise ValueError("Either a bucket must be provided in argument list or the object must have an active bucket attribute.")
         #Concatenating all csvs at return is twice as fast as if doing it during intermediate steps
-        alldf = []
+        alldf = {}
         date_range = self.get_date_range(start, end, freq='monthly_start', strp_format=strp_format) #Files on S3 are compiled on the first day of every month
-        kwargs={'bucket': bucket, 'path': path}
+        kwargs={'bucket': bucket, 'path': path, 'partition_mode':None}
         for d in range(len(date_range)-1):
             fs, fe = date_range[d], date_range[d+1]
-            fn = self.get_filename(item_cd=item_cd, file_prefix=file_prefix, start=fs, end=fe, file_ext=file_ext,strf_format=strf_format)
+            fn = self.get_filename(well_cd=well_cd, file_prefix=file_prefix, start=fs, end=fe, file_suffix=file_suffix,strf_format=strf_format)
             kwargs['file']=fn
             filepath = Path(path) / fn
-            if self.exists(bucket=bucket, filepath=filepath.as_posix()):
+            try:
                 result = self.read(sql=None, args={}, edit=[], orient='df', do_raise=False, **kwargs)
-                alldf.append(result) 
-        return pd.concat(alldf, ignore_index=True)
+                alldf[filepath] = result
+            except Exception as e:
+                logger.error(e)
+                raise e 
+
+        if combine_output:
+            all_output = [data for data in alldf.values()]
+            return pd.concat(all_output,axis=0,ignore_index=True)
+        return alldf
+
 
 
