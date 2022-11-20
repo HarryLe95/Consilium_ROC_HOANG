@@ -11,4 +11,6 @@ keras
 tensorflow
 pyyaml
 tiler
+boto3
 geopy
+sqlalchemy
