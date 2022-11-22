@@ -9,13 +9,16 @@ class ABC_Dataset:
         pass 
         
 class ABC_DataManager:
-    def read_data(self) -> dict[str, pd.DataFrame]:
+    def get_training_dataset(self) -> dict[str, np.ndarray]:
         pass 
     
-    def write_data(self) -> None:
+    def get_inference_dataset(self) -> dict[str, np.ndarray]:
         pass 
     
-    def update_metadata(self) -> None: 
+    def get_metadata(self) -> dict: 
+        pass 
+    
+    def update_metadata(self, response:dict) -> None: 
         pass 
 
  
