@@ -190,14 +190,13 @@ class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
             kwargs['file']=file_name
             try:
                 result = self.connection.read(sql=None, args={}, edit=[], orient='df', do_raise=False, **kwargs)
-                if result is not None:
-                    response[file_name] = result
+                response[file_name] = result
             except Exception as e:
                 raise e 
 
         if concat:
             try:
-                all_output = [data for data in response.values()]
+                all_output = [data for data in response.values() if data is not None]
                 all_df =  pd.concat(all_output,axis=0,ignore_index=True)
                 all_df["TS"] = pd.to_datetime(all_df['TS'])
                 all_df.set_index("TS",inplace=True)

@@ -3,10 +3,17 @@ application_name,'ROC Config',str
 cfg_s3_info,"{'connection_type' : 's3',
               'user'   : None,
               'region' : 'ap-southeast-2',
-              'bucket' : 'aa-roc-model-1-task0355600-poc-syd-174396275689'}",dict
+              'bucket' : 'aa-roc-model-1-task0355600-poc-syd-174396275689',
+              'path' : 'ROC/PROCESSED_DATA',
+              'file_prefix' : 'ROC_PROCESSED_DATA',
+              'file_suffix' : '.csv',
+              'parition_mode' : None}",dict
 cfg_file_info,"{'connection_type' : 'file',
                 'path' : 'C:/Users/HoangLe/app_prod/roc',
-                'partition_mode' : None}",dict
+                'partition_mode' : None,
+                'file_prefix' : 'ROC_PROCESSED_DATA',
+                'file_suffix' : '.csv',
+                'parition_mode' : None}",dict
 
                 
                 
