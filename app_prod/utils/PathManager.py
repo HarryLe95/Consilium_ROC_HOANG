@@ -5,12 +5,12 @@ import pandas as pd
 
 _UTIL_PATH = Path(__file__)
 
-class Paths:
+class PathManager:
     UTILS_PATH = _UTIL_PATH
     BASE_PATH = UTILS_PATH.parents[3]
     DATA_PATH = BASE_PATH / "data"
     CONFIG_PATH = BASE_PATH / "config"
-    MODEL_PATH = BASE_PATH /"model"
+    MODEL_PATH = BASE_PATH /"saved_model"
     VIZ_PATH = BASE_PATH /"viz"
     LOG_PATH = BASE_PATH/"log"
     
@@ -20,7 +20,7 @@ class Paths:
         
         Example:
         If a csv "ACRUS1.csv" has the absolute path "Data/PROCESSED_DATA/TEMP/ACRUS1.csv", and path is a pathlib.Path to "Data": 
-        >>> Paths._file_from_path(path, "ACRUS1.csv", ['PROCESSED_DATA', 'TEMP'])
+        >>> PathManager._file_from_path(path, "ACRUS1.csv", ['PROCESSED_DATA', 'TEMP'])
         >>> Path("Data/PROCESSED_DATA/TEMP/ACRUS1.csv")
 
         Args:

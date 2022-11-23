@@ -161,7 +161,7 @@ cython_debug/
 
 #Ignore data and model 
 data/
-model/
+saved_model/
 viz/
 *.png
 **.csv

@@ -1,24 +1,28 @@
 from typing import Sequence 
-from datetime import datetime, timedelta
-from datetime import date as date_
+from datetime import timedelta
+import datetime 
 from dateutil import relativedelta
 from copy import deepcopy
+import logging
 
 import pandas as pd 
 import numpy as np 
 
-from generator.generic import ABC_Dataset
+from Dataset.generic import ABC_Dataset
 from utils.advancedanalytics_util import AAUConnection, S3Connection, FileConnection, AAPandaSQL, aauconnect_
 
-class ROC_PROCESSOR_MIXIN:
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+class PROCESSOR_MIXIN:
     #TODO: fix process data once finalised 
     @classmethod
     def process_data(cls, data: pd.DataFrame) -> pd.DataFrame:
         return data
     
-class ROC_FILENAMING_MIXIN:
+class FILENAMING_MIXIN:
     @staticmethod
-    def parse_date(date:str|datetime, strp_format='%Y-%m-%d') -> datetime:
+    def parse_date(date:str|datetime.datetime, strp_format='%Y-%m-%d') -> datetime.datetime:
         """Parse str as datetime object
 
         Args:
@@ -26,12 +30,10 @@ class ROC_FILENAMING_MIXIN:
             strp_format (str, optional): format. Defaults to '%Y-%m-%d'.
 
         Returns:
-            datetime: datetime object from date
+            datetime.datetime: datetime object from date
         """
-        if isinstance(date,(date_,datetime)):
-            return date 
         try:
-            return datetime.strptime(date, strp_format)
+            return datetime.datetime.strptime(date, strp_format)
         except:
             raise ValueError(f"Incompatiable input date {date} and format: {strp_format}")
 
@@ -39,9 +41,8 @@ class ROC_FILENAMING_MIXIN:
     def get_filename(cls,
                 well_cd:str, 
                 file_prefix:str, 
-                start:datetime|str, 
-                end:datetime|str, 
-                strp_format:str='%Y%m%d',
+                start:datetime.datetime, 
+                end:datetime.datetime,
                 strf_format:str='%Y%m%d',
                 file_suffix:str='.csv') -> str:
         """Get filename that adheres to Santos' naming convention
@@ -52,26 +53,16 @@ class ROC_FILENAMING_MIXIN:
         Args:
             well_cd (str): well_cd 
             file_prefix (str): file_prefix
-            start (datetime | str): start date
-            end (datetime | str): end date
-            strp_format (str, optional): format to read start and end if given as string. Defaults to '%Y%m%d'.
+            start (datetime.datetime): start date
+            end (datetime.datetime): end date
             strf_format (str, optional): format suffix date in file name. Defaults to '%Y%m%d'.
             file_suffix (str, optional): file_suffixension. Defaults to 'csv'.
         
         Returns:
             str: formatted filename 
         """
-        if isinstance(start,str):
-            start = cls.parse_date(start, strp_format)
-        if isinstance(end,str):
-            end = cls.parse_date(end, strp_format)
-        fn = '{}_{}_{}_{}{}'.format(well_cd, 
-                                    file_prefix, 
-                                    start.strftime(strf_format), 
-                                    end.strftime(strf_format), 
-                                    file_suffix)
-        return fn
-
+        return f"{well_cd}_{file_prefix}_{start.strftime(strf_format)}_{end.strftime(strf_format)}{file_suffix}"
+        
     @classmethod 
     def get_metadata_name(cls,
                 well_cd:str, 
@@ -90,14 +81,12 @@ class ROC_FILENAMING_MIXIN:
         Returns:
             str: formatted filename 
         """
-        fn = '{}_{}_LAST{}'.format(well_cd, 
-                                    file_prefix, 
-                                    file_suffix)
-        return fn
+        return f'{well_cd}_{file_prefix}_LAST{file_suffix}'
     
     @classmethod
     def get_date_range(self, start_date:str, end_date:str, strp_format:str='%Y-%m-%d') -> pd.Series:
-        """Get a date range from strings specifying the start and end date
+        """Get a date range from strings specifying the start and end date. If start and end are different days of the same month and year, calling the method
+        returns the interval [month, month+1]
 
         Args:
             start_date (str): start date
@@ -114,18 +103,20 @@ class ROC_FILENAMING_MIXIN:
 
         return pd.date_range(start_date, end_date, freq="MS")
         
-class Dataset(ABC_Dataset, ROC_PROCESSOR_MIXIN, ROC_FILENAMING_MIXIN):
+class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
     def __init__(self, 
                  connection: AAUConnection, 
                  path:str, 
                  file_prefix:str, 
                  file_suffix:str, 
+                 datetime_index_column:str="TS",
                  **kwargs) -> None:
         self.connection = connection 
         self.partition_mode = None 
         self.path = path
         self.file_prefix = file_prefix
         self.file_suffix = file_suffix
+        self.datetime_index_column = datetime_index_column
         self.kwargs = {"path":self.path, "partition_mode":self.partition_mode}
         self.extract_keyword(kwargs)
         
@@ -156,6 +147,35 @@ class Dataset(ABC_Dataset, ROC_PROCESSOR_MIXIN, ROC_FILENAMING_MIXIN):
     def extract_sql_keyword(self, kwargs:dict)-> None:
         pass 
     
+    def get_output_time_index_(self, start:str|datetime.date, end:str|datetime.date, strp_format="%Y-%m-%d") -> tuple[str,str]:
+        """Get start and end time for running inference. For example: if today is 2nd of Nov 2022, in live mode, the model runs inference for data 
+        on the 1st of Nov 2022. The start and end time indices are - '2016-01-01 00:00' and '2016-01-01 23:59'
+
+        Args: 
+            start (str | datetime.date): start date. Output start index = start 
+            end (str | datetime.date): end date. Output end index = end - 1 minute
+            strp_format (str, optional): _description_. Defaults to "%Y-%m-%d".
+
+        Raises:
+            TypeError: if input types are neither string nor datetime.date
+
+        Returns:
+            tuple[str,str]: start, end time indices 
+        """
+        minute_string_format = "%Y-%m-%d %H:%M"
+        def process_date_slices(d:str|datetime.date, offset:timedelta=timedelta(minutes=0)):
+            if not isinstance(d,(str,datetime.date)):
+                raise TypeError(f"Expected type: (str,datetime.date), actual type: {type(d)}")
+            if isinstance(d,str):
+                d = datetime.datetime.strptime(d, strp_format)
+            if isinstance(d,datetime.date): #Convert from datetime.date to datetime.datetime object 
+                d = datetime.datetime.strptime(d.strftime(minute_string_format),minute_string_format) 
+            d = d + offset
+            return d.strftime(minute_string_format)
+        start_ = process_date_slices(start)
+        end_ = process_date_slices(end, timedelta(minutes=-1))
+        return start_, end_
+    
     def read_data(self, well_cd:str, start:str, end:str, concat:bool=True, strp_format='%Y-%m-%d',strf_format:str='%Y%m%d') -> pd.DataFrame:
         response = {}
         date_range = self.get_date_range(start, end, strp_format=strp_format)
@@ -176,12 +196,16 @@ class Dataset(ABC_Dataset, ROC_PROCESSOR_MIXIN, ROC_FILENAMING_MIXIN):
                 raise e 
 
         if concat:
-            all_output = [data for data in response.values()]
-            all_df =  pd.concat(all_output,axis=0,ignore_index=True)
-            all_df["TS"] = pd.to_datetime(all_df['TS'])
-            all_df.set_index("TS",inplace=True)
-            #TODO - fix this 
-            return all_df.loc[str(start):str(end),:]
+            try:
+                all_output = [data for data in response.values()]
+                all_df =  pd.concat(all_output,axis=0,ignore_index=True)
+                all_df["TS"] = pd.to_datetime(all_df['TS'])
+                all_df.set_index("TS",inplace=True)
+                start_, end_ = self.get_output_time_index_(start, end, strp_format)
+                return all_df.loc[start_:end_,:]
+            except Exception as e:
+                logger.error(e)
+                return None
         return response
     
     def read_metadata(self, well_cd:str) -> pd.DataFrame: 
@@ -222,8 +246,8 @@ class Dataset(ABC_Dataset, ROC_PROCESSOR_MIXIN, ROC_FILENAMING_MIXIN):
             if well_df is not None: 
                 well_df['WELL_CD'] = well
                 all_wells[well]=well_df
-        if len(all_wells)==0:
-            raise ValueError("Empty inference dataframe")
+            else:
+                all_wells[well]=None
         return all_wells
     
     def get_inference_dataset(self, wells:Sequence[str], start:str, end:str, strp_format='%Y-%m-%d',strf_format:str='%Y%m%d') -> dict[str,pd.DataFrame]:
