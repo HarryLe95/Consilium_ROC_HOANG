@@ -2,7 +2,6 @@
 
 import numpy as np
 import pandas as pd
-import yaml
 from src.utils.PathManager import Paths as Path 
 
 class BayesianLabeler:
@@ -29,28 +28,51 @@ class BayesianLabeler:
         self.agg_df, self.rolling_mean, self.rolling_std, self.rolling_max = self.output()
         
     @staticmethod 
-    def get_data(well_cd):
-        station_dict = Path.read_config("nearest_station.csv")
-
-        station_name = station_dict[well_cd]
+    def get_label_df(well_cd:str)->pd.DataFrame:
+        #Get label dataframe preprocessed
         try:
             label_df = pd.read_pickle(Path.data(f"{well_cd}_2016-01-01_2023-01-01_labelled.pkl"))
         except Exception as e:
             print(e)
             label_df = None 
-        raw_df = pd.read_csv(Path.data(f"{well_cd}_2016-01-01_2023-01-01_raw.csv"),index_col="TS",parse_dates=['TS'])
-        weather_df = pd.read_csv(Path.data(f"{station_name}_2016-01-01_2023-01-01_weather.csv"), index_col="TS",parse_dates=['TS'])
-
+        if label_df is not None: 
+            label_df = label_df.loc[:,['labels']]
+        return label_df 
+    
+    @staticmethod 
+    def get_raw_df(well_cd:str, features:list[str]=["ROC_VOLTAGE","FLOW","PRESSURE_TH"])->pd.DataFrame:
+        #Get raw dataframe unprocessed
+        try: 
+            raw_df = pd.read_csv(Path.data(f"{well_cd}_2016-01-01_2023-01-01_raw.csv"),index_col="TS",parse_dates=['TS'])
+        except Exception as e: 
+            print(e)
+            raw_df = None 
+        if raw_df is not None: 
+            available_features = [f for f in features if f in raw_df.columns]
+            available_features += [f"Mask_{f}" for f in available_features]
+            raw_df = raw_df.loc[:,available_features]
+        return raw_df 
+    
+    @staticmethod 
+    def get_agg_df(raw_df:pd.DataFrame, label_df:pd.DataFrame, main_feature:str="ROC_VOLTAGE")->pd.DataFrame:
+        #Get aggregated dataframe and remove missing rows
+        if raw_df is None: 
+            return None 
         agg_df = raw_df.groupby(raw_df.index.date).agg(list)
-        agg_df["length"]=agg_df.ROC_VOLTAGE.apply(lambda x:len(x))
-        agg_df = agg_df[agg_df.length==1440]
-        if label_df is not None:
-            agg_df["labels"] = label_df.labels
+        agg_df["length"] = agg_df[main_feature].apply(lambda x: len(x))
+        agg_df = agg_df[agg_df["length"]==1440]
+        if label_df is not None: 
+            agg_df["labels"] = label_df["labels"]
         agg_df.index = pd.to_datetime(agg_df.index)
-        label_df = label_df.loc[:,['labels']]
-        weather_df = weather_df.loc[:,['cloudcover','direct_radiation']]
-        raw_df = raw_df.loc[:,['ROC_VOLTAGE','FLOW','PRESSURE_TH']]
-        return agg_df, label_df, raw_df, weather_df 
+        return agg_df 
+         
+    @classmethod  
+    def get_data(cls, well_cd:str)->dict[str,pd.DataFrame|None]:
+        raw_df = cls.get_raw_df(well_cd)
+        label_df = cls.get_label_df(well_cd)
+        agg_df = cls.get_agg_df(raw_df, label_df)
+        return {"raw_df": raw_df, "label_df": label_df, "agg_df":agg_df}
+
         
     @staticmethod 
     def get_integral_features(agg_df:pd.DataFrame, 
