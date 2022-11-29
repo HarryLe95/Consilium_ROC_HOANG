@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from src.utils.PathManager import Paths as Path 
 from typing import Sequence, Callable, List
+from itertools import groupby
 from scipy.interpolate import CubicSpline, interp1d 
 
 def get_absolute_minimum(y:list)->float:
@@ -103,11 +104,12 @@ class FeatureExtractor_:
     
 
 class IntervalUtility:
-    def __init__(self, threshold:float, start:float=600, end:float=1200, feature:str="ROC_VOLTAGE"):
+    def __init__(self, threshold:float, start:float=600, end:float=1200, feature:str="ROC_VOLTAGE", min_length:int=60):
         self.start=start
         self.end=end 
         self.feature=feature
         self.threshold = threshold 
+        self.min_length = min_length
         
     def get_correction_region(self, x:pd.Series)->List[List]:
         neg_idx = np.array(np.where(x<=-self.threshold)[0])
@@ -147,8 +149,7 @@ class IntervalUtility:
             data[interval[0]:interval[1]] = data[interval[0]:interval[1]]+dV
         return data
     
-    @classmethod
-    def get_largest_outage_interval(cls, mask:pd.Series, start:float, end:float)->tuple:
+    def get_largest_outage_interval(self, mask:pd.Series, start:float, end:float)->tuple:
         """Get (start,end) tuple specifying the longest consecutive zeros in a sequence
 
         Args:
@@ -163,21 +164,29 @@ class IntervalUtility:
         if mask is None:
             return None
         mask = np.array(mask[start:end])
-        mask = np.where(mask==0)[0]+start
-        if len(mask)==0 or len(mask) == end - start:
-            return None
+        index = 0
+        zero_index = []
+        zero_length = [] 
+        for mask_val,mask_group in groupby(mask):
+            new_length = len(list(mask_group))
+            if mask_val == 0: 
+                zero_index.append(index)
+                zero_length.append(new_length)
+            index+=new_length
+        zero_index = np.array(zero_index)
+        zero_length = np.array(zero_length)
 
-        mask_start = mask[0]
-        mask_end = mask[-1]
-        consecutive_mask = np.diff(mask)
-        interval_index = np.where(consecutive_mask!=1)[0] + mask_start + 1
-        ub = np.insert(interval_index,len(interval_index),mask_end)
-        lb = np.insert(interval_index,0,mask_start)
-        interval_length= ub - lb 
-        index = np.argmax(interval_length)
-        start_index = lb[index]
-        end_index = ub[index]
-        return (start_index, end_index)
+        zero_index = zero_index[zero_length >= self.min_length]
+        zero_length = zero_length[zero_length >= self.min_length]
+
+        if len(zero_length) == 0:
+            return None 
+        if len(zero_length) == len(mask):
+            return None 
+        index = np.argmax(zero_length)
+        start_index = zero_index[index]
+        end_index = start_index + zero_length[index]
+        return start_index, end_index
 
     @classmethod 
     def verify_intersection(cls, intervals:list[tuple])->int:
@@ -216,7 +225,7 @@ class FeatureExtractor(FeatureExtractor_):
         interpolated_feature['correction_region'] = gradient.apply(lambda x: region_identifier.get_correction_region(x))
         return interpolated_feature.apply(lambda x: region_identifier.correct(x),axis=1,raw=False)
     
-    def get_data_outage_failure_label(self, start:float=600, end:float=1400, min_count:int=60)->pd.Series:
+    def get_data_outage_failure_label(self, start:float=600, end:float=1400, min_length:int=60)->pd.Series:
         """Check for presence of battery failure that cause data outage for all tags.
         
         In many wells, failures right before dawn correspond to a gap in all tag records (ROC_VOLTAGE, FLOW, PRESSURE_TH) in the same period.
@@ -240,18 +249,17 @@ class FeatureExtractor(FeatureExtractor_):
         FLOW_data = self.data['agg_df']['Mask_FLOW']
         PRESSURE_data = self.data['agg_df']['Mask_PRESSURE_TH'] if 'Mask_PRESSURE_TH' in self.data['agg_df'] else None 
         
+        labeler = IntervalUtility(threshold=0.05,start=start,end=end,min_length=min_length)
         temp_df = pd.DataFrame()
-        temp_df['VOLTAGE_interval'] = VOLTAGE_data.apply(lambda x: IntervalUtility.get_largest_outage_interval(x, start, end))
-        temp_df['FLOW_interval'] = FLOW_data.apply(lambda x: IntervalUtility.get_largest_outage_interval(x, start, end))
-        temp_df['PRESSURE_interval'] = PRESSURE_data.apply(lambda x: IntervalUtility.get_largest_outage_interval(x, start, end)) if PRESSURE_data is not None else None 
+        temp_df['VOLTAGE_interval'] = VOLTAGE_data.apply(lambda x: labeler.get_largest_outage_interval(x, start, end))
+        temp_df['FLOW_interval'] = FLOW_data.apply(lambda x: labeler.get_largest_outage_interval(x, start, end))
+        temp_df['PRESSURE_interval'] = PRESSURE_data.apply(lambda x: labeler.get_largest_outage_interval(x, start, end)) if PRESSURE_data is not None else None 
         
         def label_outage(x:pd.Series)->pd.Series:
             if x['VOLTAGE_interval'] is None:
                 return 2 
             if x['PRESSURE_interval'] is None and x['FLOW_interval'] is None:
                 return 2 
-            if x['VOLTAGE_interval'][1] - x['VOLTAGE_interval'][0] < min_count:
-                return 0 
             return IntervalUtility.verify_intersection([x['VOLTAGE_interval'],x['FLOW_interval'],x['PRESSURE_interval']])
             
         return temp_df, temp_df.apply(lambda x: label_outage(x), raw=False,axis=1)
