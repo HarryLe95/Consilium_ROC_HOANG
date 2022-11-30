@@ -214,12 +214,14 @@ class FeatureExtractor(FeatureExtractor_):
                  data_outage_detection_dict:dict={"start":1000, "end":1400, "min_length":60, "missing_rate":0.8},
                  dawn_VOLTAGE_drop_detection_dict:dict={"first_derivative_threshold":0.4, "second_derivative_threshold":0.4,"use_second_derivative":True},
                  charging_fault_detection_dict:dict={"max_error_threshold":0.08, "mean_absolute_error_threshold":0.02,"mean_squared_error_threshold":0.008,"r2_threshold":0.7},
+                 weather_detection_dict:dict={"end":400,"quantile":0.85,"weather_threshold":0.98,"window":30},
                  )->None:
         self._verify_operation_correction_dict(operation_correction_dict)
         self._verify_anomaly_detection_dict(anomaly_detection_dict)
         self._verify_data_outage_detection_dict(data_outage_detection_dict)
         self._verify_dawn_VOLTAGE_drop_detection_dict(dawn_VOLTAGE_drop_detection_dict)
         self._verify_charging_fault_detection_dict(charging_fault_detection_dict)
+        self._verify_weather_detection_dict(weather_detection_dict)
         self.well_code = well_code
         self.loader = DataLoader()
         self.data = self.get_data()
@@ -255,6 +257,13 @@ class FeatureExtractor(FeatureExtractor_):
         mean_squared_error_threshold=0.008 if "mean_squared_error_threshold" not in data_dict else data_dict["mean_squared_error_threshold"]
         r2_threshold=0.7 if "r2_threshold" not in data_dict else data_dict["r2_threshold"]
         self.charging_fault_detection_dict = {"max_error_threshold":max_error_threshold,"mean_absolute_error_threshold":mean_absolute_error_threshold,"mean_squared_error_threshold":mean_squared_error_threshold,"r2_threshold":r2_threshold}
+    
+    def _verify_weather_detection_dict(self, data_dict:dict)->None:
+        end=400 if "end" not in data_dict else data_dict["end"]
+        window=30 if "window" not in data_dict else data_dict["window"]
+        quantile=0.85 if "quantile" not in data_dict else data_dict["quantile"]
+        weather_threshold=0.98 if "weather_threshold" not in data_dict else data_dict["weather_threshold"]
+        self.weather_detection_dict = {"end":end, "window":window, "quantile":quantile, "weather_threshold": weather_threshold}
     
     def get_data(self)->dict[str,pd.DataFrame]:
         return self.loader.get_data(self.well_code)
@@ -424,7 +433,30 @@ class FeatureExtractor(FeatureExtractor_):
                 "true_neg": TN,
                 "false_neg": FN}
         
-    def get_weather_label(self)->pd.Series:
-        pass 
+    def get_weather_label(self)->tuple[pd.Series,pd.Series]:
+        """Get weather label and percentage cloud_cover.
+        
+        Achieved by comparing the ratio of the integral of the day period (specified by config kwd "end") over the benchmark 
+        in a specified window length (controlled by config kwd "window") against a specific weather threshold.
+
+        Args: embedded in weather_detection_dict
+            end (int|Optional) - index of end of day. Defaults to 400
+            window (int|Optional) - window length of review. Defaults to 30 days.
+            quantile (float|Optional) - quantile at which the day in window is considered a benchmark. Defaults to 0.85
+            weather_threshold (float|Optional) - weather threshold ratio
+        Returns:
+            tuple[pd.Series]: weather label and fractional cloud-cover
+        """
+        data_anomaly_label = self.get_data_anomaly_label()
+        normal_date = data_anomaly_label[data_anomaly_label==0].index
+        V_interp_data = self.interpolated_data['ROC_VOLTAGE'].loc[normal_date]
+        morning_V_integral = V_interp_data.apply(lambda x: np.trapz(x[:self.weather_detection_dict["end"]]))
+
+
+        def get_upper_IQR(x):
+            return np.quantile(x,self.weather_detection_dict["quantile"])
+        rolling_median = morning_V_integral.rolling(window=self.weather_detection_dict["window"]).apply(get_upper_IQR)
+        ratio = morning_V_integral/rolling_median
+        return (ratio<=self.weather_detection_dict["weather_threshold"]).astype(int)
     
     
