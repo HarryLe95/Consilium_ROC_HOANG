@@ -4,6 +4,8 @@ from src.utils.PathManager import Paths as Path
 from typing import Sequence, Callable, List
 from itertools import groupby
 from scipy.interpolate import CubicSpline, interp1d 
+from sklearn.metrics import max_error, mean_absolute_error, mean_squared_error, r2_score
+from sklearn.linear_model import LinearRegression
 
 def get_absolute_minimum(y:list)->float:
     y = np.array(y)
@@ -102,7 +104,6 @@ class FeatureExtractor_:
     def get_gradient_feature(cls, agg_df:pd.DataFrame, feature:str)->pd.Series:
         return agg_df[feature].apply(lambda x: np.gradient(x))
     
-
 class IntervalUtility:
     def __init__(self, threshold:float, start:float=600, end:float=1200, feature:str="ROC_VOLTAGE", min_length:int=60):
         self.start=start
@@ -181,7 +182,7 @@ class IntervalUtility:
 
         if len(zero_length) == 0:
             return None 
-        if len(zero_length) == len(mask):
+        if len(zero_length) >= 0.8*len(mask):
             return None 
         index = np.argmax(zero_length)
         start_index = zero_index[index]
@@ -207,25 +208,78 @@ class IntervalUtility:
         return int(sup_lb < inf_ub)
     
 class FeatureExtractor(FeatureExtractor_):
-    def __init__(self, well_code:str, feature:str="ROC_VOLTAGE")->None:
+    def __init__(self, well_code:str, feature:str="ROC_VOLTAGE", 
+                 operation_correction_dict:dict={"gradient_threshold":0.025,"start":600,"end":1200},
+                 anomaly_detection_dict:dict={"missing_rate":0.8},
+                 data_outage_detection_dict:dict={"start":1000, "end":1400, "min_length":60, "missing_rate":0.8},
+                 dawn_VOLTAGE_drop_detection_dict:dict={"first_derivative_threshold":0.4, "second_derivative_threshold":0.4,"use_second_derivative":True},
+                 charging_fault_detection_dict:dict={"max_error_threshold":0.08, "mean_absolute_error_threshold":0.02,"mean_squared_error_threshold":0.008,"r2_threshold":0.7},
+                 )->None:
+        self._verify_operation_correction_dict(operation_correction_dict)
+        self._verify_anomaly_detection_dict(anomaly_detection_dict)
+        self._verify_data_outage_detection_dict(data_outage_detection_dict)
+        self._verify_dawn_VOLTAGE_drop_detection_dict(dawn_VOLTAGE_drop_detection_dict)
+        self._verify_charging_fault_detection_dict(charging_fault_detection_dict)
         self.well_code = well_code
         self.loader = DataLoader()
         self.data = self.get_data()
         self.feature = feature
         self.interpolated_data = self.get_interpolated_feature(self.data['agg_df'],self.feature).to_frame()
+    
+    def _verify_operation_correction_dict(self, data_dict:dict)->None:
+        gradient_threshold = 0.025 if 'gradient_threshold' not in data_dict else data_dict['gradient_threshold']
+        start = 600 if 'start' not in data_dict else data_dict['start']
+        end = 1200 if 'end' not in data_dict else data_dict['end']
+        self.operation_correction_dict={"gradient_threshold":gradient_threshold, "start":start, "end":end}
         
+    def _verify_data_outage_detection_dict(self, data_dict:dict)->None:
+        min_length = 60 if 'min_length' not in data_dict else data_dict['min_length']
+        start = 1000 if 'start' not in data_dict else data_dict['start']
+        end = 1200 if 'end' not in data_dict else data_dict['end']
+        missing_rate = 0.8 if "missing_rate" not in data_dict else data_dict['missing_rate']
+        self.data_outage_detection_dict={"min_length":min_length, "start":start, "end":end, "missing_rate":missing_rate}
+        
+    def _verify_anomaly_detection_dict(self, data_dict:dict)->None:
+        missing_rate = 0.8 if "missing_rate" not in data_dict else data_dict['missing_rate']
+        self.anomaly_detection_dict={"missing_rate":missing_rate}
+    
+    def _verify_dawn_VOLTAGE_drop_detection_dict(self, data_dict:dict)->None:
+        first_derivative_threshold=0.4 if "first_derivative_threshold" not in data_dict else data_dict['first_derivative_threshold']
+        second_derivative_threshold=0.4 if "second_derivative_threshold" not in data_dict else data_dict["second_derivative_threshold"] 
+        use_second_derivate=True if "use_second_derivate" not in data_dict else data_dict["use_second_derivate"]
+        self.dawn_VOLTAGE_drop_detection_dict={"first_derivative_threshold":first_derivative_threshold, "second_derivative_threshold":second_derivative_threshold, "use_second_derivative":use_second_derivate}
+             
+    def _verify_charging_fault_detection_dict(self, data_dict:dict)->None:
+        max_error_threshold = 0.08 if "max_error_threshold" not in data_dict else data_dict["max_error_threshold"]
+        mean_absolute_error_threshold= 0.02 if "mean_absolute_error_threshold" not in data_dict else data_dict["mean_absolute_error_threshold"]
+        mean_squared_error_threshold=0.008 if "mean_squared_error_threshold" not in data_dict else data_dict["mean_squared_error_threshold"]
+        r2_threshold=0.7 if "r2_threshold" not in data_dict else data_dict["r2_threshold"]
+        self.charging_fault_detection_dict = {"max_error_threshold":max_error_threshold,"mean_absolute_error_threshold":mean_absolute_error_threshold,"mean_squared_error_threshold":mean_squared_error_threshold,"r2_threshold":r2_threshold}
+    
     def get_data(self)->dict[str,pd.DataFrame]:
         return self.loader.get_data(self.well_code)
         
-    def get_operation_corrected_feature(self, gradient_threshold:float=0.025,start:float=600,end:float=1200)->pd.Series:
+    def get_operation_corrected_feature(self)->pd.Series:
         agg_df = self.data['agg_df']
         interpolated_feature = self.get_interpolated_feature(agg_df, self.feature, "linear").to_frame()
         gradient = self.get_gradient_feature(interpolated_feature, self.feature)
-        region_identifier = IntervalUtility(gradient_threshold,start,end)
+        region_identifier = IntervalUtility(self.operation_correction_dict['gradient_threshold'], self.operation_correction_dict['start'], self.operation_correction_dict['end'])
         interpolated_feature['correction_region'] = gradient.apply(lambda x: region_identifier.get_correction_region(x))
         return interpolated_feature.apply(lambda x: region_identifier.correct(x),axis=1,raw=False)
     
-    def get_data_outage_failure_label(self, start:float=600, end:float=1400, min_length:int=60)->pd.Series:
+    def get_data_anomaly_label(self)->pd.Series:
+        """Assign data anomaly label based on rate of missing ROC_VOLTAGE data 
+        
+        Args - embedded in anomaly_detection_dict
+            missing_rate (float): fraction of missing data in a day for it to be considered data anomaly. Defaults to 0.8
+
+        Returns:
+            pd.Series: 0 - not abnormal, 1 - data anomaly 
+        """
+        VOLTAGE_data = self.data['agg_df']['Mask_ROC_VOLTAGE']
+        return VOLTAGE_data.apply(lambda x: int((1-sum(x)/len(x))>=self.anomaly_detection_dict['missing_rate']))
+    
+    def get_data_outage_failure_label(self)->pd.Series:
         """Check for presence of battery failure that cause data outage for all tags.
         
         In many wells, failures right before dawn correspond to a gap in all tag records (ROC_VOLTAGE, FLOW, PRESSURE_TH) in the same period.
@@ -237,23 +291,26 @@ class FeatureExtractor(FeatureExtractor_):
         If the three periods overlap, assign data-outage failure label (1). If both PRESSURE_TH is unavailable and FLOW data is zero throughout OR 
         If data for the entire start-end period is missing, return uncertain lable.
 
-        Args:
+        Args: embedded in data_outage_detection_dict
             start (float, optional): index of the start of evening. Defaults to 600.
             end (float, optional): index of the end of evening and early morning. Defaults to 1400.
             min_count (int, optional): minumum number of minutes in an outage event for it to be classified as data outage. Defaults to 60 mins = 1 hour.
+            missing_rate (float, optional): fraction of missing ROC_VOLTAGE data for a day to be considered abnormal. Defaults to 0.8 - If 80% of data is missing -> Data Anomaly
 
         Returns:
-            pd.Series: label - 0: no failure, 1: has failure, 2: uncertain
+            pd.Series: label - 0: no failure, 1: has failure, 2: uncertain/data anomaly
         """
         VOLTAGE_data = self.data['agg_df']['Mask_ROC_VOLTAGE']
         FLOW_data = self.data['agg_df']['Mask_FLOW']
         PRESSURE_data = self.data['agg_df']['Mask_PRESSURE_TH'] if 'Mask_PRESSURE_TH' in self.data['agg_df'] else None 
         
-        labeler = IntervalUtility(threshold=0.05,start=start,end=end,min_length=min_length)
+        labeler = IntervalUtility(threshold=0.05,start=self.data_outage_detection_dict['start'],
+                                  end=self.data_outage_detection_dict['end'],
+                                  min_length=self.data_outage_detection_dict['min_length'])
         temp_df = pd.DataFrame()
-        temp_df['VOLTAGE_interval'] = VOLTAGE_data.apply(lambda x: labeler.get_largest_outage_interval(x, start, end))
-        temp_df['FLOW_interval'] = FLOW_data.apply(lambda x: labeler.get_largest_outage_interval(x, start, end))
-        temp_df['PRESSURE_interval'] = PRESSURE_data.apply(lambda x: labeler.get_largest_outage_interval(x, start, end)) if PRESSURE_data is not None else None 
+        temp_df['VOLTAGE_interval'] = VOLTAGE_data.apply(lambda x: labeler.get_largest_outage_interval(x, self.data_outage_detection_dict['start'], self.data_outage_detection_dict['end']))
+        temp_df['FLOW_interval'] = FLOW_data.apply(lambda x: labeler.get_largest_outage_interval(x, self.data_outage_detection_dict['start'], self.data_outage_detection_dict['end']))
+        temp_df['PRESSURE_interval'] = PRESSURE_data.apply(lambda x: labeler.get_largest_outage_interval(x, self.data_outage_detection_dict['start'], self.data_outage_detection_dict['end'])) if PRESSURE_data is not None else None 
         
         def label_outage(x:pd.Series)->pd.Series:
             if x['VOLTAGE_interval'] is None:
@@ -261,19 +318,22 @@ class FeatureExtractor(FeatureExtractor_):
             if x['PRESSURE_interval'] is None and x['FLOW_interval'] is None:
                 return 2 
             return IntervalUtility.verify_intersection([x['VOLTAGE_interval'],x['FLOW_interval'],x['PRESSURE_interval']])
-            
-        return temp_df, temp_df.apply(lambda x: label_outage(x), raw=False,axis=1)
         
-    
-    def get_dawn_VOLTAGE_drop_failure_label(self, 
-                                            first_derivative_threshold:float=0.4, 
-                                            second_derivative_threshold:float=0.4, 
-                                            use_second_derivate:bool=True)->pd.Series: 
+        #Post Processing - remove labels caused by data anomaly - i.e. long periods of missing ROC_VOLTAGE data
+        outage_label_df = temp_df.apply(lambda x: label_outage(x), raw=False,axis=1)
+        anomaly_label = self.get_data_anomaly_label()
+
+        anomaly_index = anomaly_label[anomaly_label==1].index
+        outage_label_df[outage_label_df.index.isin(anomaly_index)]=2
+        
+        return outage_label_df
+        
+    def get_dawn_VOLTAGE_drop_failure_label(self)->pd.Series: 
         """Check for presence of battery failure that cause a sharp drop in ROC_VOLTAGE before dawn. 
         
         This method computes the first and second derivatives and assigns labels by thresholding. This method works on interpolated data. 
         
-        Args:
+        Args: embedded in dawn_VOLTAGE_drop_detection_dict
             first_derivative_threshold (float, optional): threshold of the first derivative. Defaults to 0.4.
             second_derivative_threshold (float, optional): threshold of the second derivative. Defaults to 0.4.
             use_second_derivate (bool, optional): whether to use 2nd derivative to derive label. Defaults to True.
@@ -281,22 +341,90 @@ class FeatureExtractor(FeatureExtractor_):
         Returns:
             pd.Series: failure label. 0 - no failure, 1 - failure present 
         """
-        first_derivative = self.get_gradient_feature(self.interpolated_data.to_frame(), self.feature)
-        first_derivative_label = first_derivative.apply(lambda x: np.any(np.abs(x[600:1400])>=first_derivative_threshold))
-        if use_second_derivate:
+        first_derivative = self.get_gradient_feature(self.interpolated_data, self.feature)
+        first_derivative_label = first_derivative.apply(lambda x: int(np.any(np.abs(x[600:1400])>=self.dawn_VOLTAGE_drop_detection_dict['first_derivative_threshold'])))
+        if self.dawn_VOLTAGE_drop_detection_dict['use_second_derivative']:
             second_derivative = self.get_gradient_feature(first_derivative.to_frame(), self.feature)
-            second_derivative_label = second_derivative.apply(lambda x: np.any(np.abs(x[600:1400])>=second_derivative_threshold))
+            second_derivative_label = second_derivative.apply(lambda x: int(np.any(np.abs(x[600:1400])>=self.dawn_VOLTAGE_drop_detection_dict['second_derivative_threshold'])))
             return first_derivative_label*second_derivative_label
         return first_derivative_label
     
-    
-    def get_well_shutin_failure_label(self)->pd.Series:
-        """Check for presence of battery failure causing shutins. 
+    def get_charging_fault_label(self)->pd.Series:
+        """Get charging fault label.
         
-        Low battery VOlTAGE can cause unexpected shut-ins. Shut-ins can be characterised by periods in which FLOW data drops to zero (from non-zero) and PRESSURE_TH sharply increases.
-        This period should also correspond to a drop in ROC_VOLTAGE.
+        Charging Fault results in a continuous decline of ROC_VOLTAGE that is almost monotonic. A linear regressor is fitted on the data, 
+        with different fitness metrics compared against thresholds to provide label.
+
+        Args: embedded in charging_fault_config_dict
+            max_error_threshold (float): max error 
+            mean_squared_error_threshold (float): mse threshold 
+            mean_absolute_error_threshold (float): mae threshold
+            r2_threshold (float): r2 score threshold
 
         Returns:
-            pd.Series: _description_
+            pd.Series: 0 - no charging fault, 1 - charging fault, 2 - data anomaly 
         """
+        
+        df = self.data['agg_df']
+        
+        def get_charging_fault_label_(data):
+            Y = np.array(data['ROC_VOLTAGE'])
+            X = np.arange(len(Y))
+            mask = np.array(data['Mask_ROC_VOLTAGE'])
+            Y_ = Y[mask==1].reshape(-1,1)
+            X_ = X[mask==1].reshape(-1,1)
+            if len(Y_)<=0.10*len(Y):
+                return 2 
+            reg = LinearRegression().fit(X_,Y_)
+            Y_pred = reg.predict(X_)
+            max_e = max_error(Y_,Y_pred)
+            mae_e = mean_absolute_error(Y_,Y_pred)
+            mse_e = mean_squared_error(Y_,Y_pred)
+            r2_e = r2_score(Y_,Y_pred)
+            return int((max_e <= self.charging_fault_detection_dict['max_error_threshold']) and
+                       (mae_e<= self.charging_fault_detection_dict['mean_absolute_error_threshold']) and
+                       (mse_e<= self.charging_fault_detection_dict['mean_squared_error_threshold']) and
+                       (r2_e>=self.charging_fault_detection_dict['r2_threshold']))
+            
+        #Post Processing - remove labels caused by data anomaly - i.e. long periods of missing ROC_VOLTAGE data
+        return df.apply(lambda x: get_charging_fault_label_(x),axis=1,raw=False)
+    
+    def evaluate_labeller(self, prediction_df:pd.Series, verbose:bool=False, positive_labels:Sequence[int]=[2,5])->dict:
+        """Get confusion matrix evaluation for a given prediction dataframe
+
+        Args:
+            prediction_df (pd.Series): prediction dataframe 
+            verbose (bool, optional): whether to get the date indices rather than the metric results. Defaults to False.
+
+        Raises:
+            ValueError: if self.data['label_df'] is None. Either labelled data is not available or data fetching encountered an error
+
+        Returns:
+            dict: confusion matrix metric evaluation 
+        """
+        if self.data['label_df'] is None:
+            raise ValueError("No ground truth provided for comparison")
+        gt = self.data['label_df']
+        gt_pos_index = set(gt[gt['labels'].isin(positive_labels)].index)
+        gt_neg_index = set(prediction_df.index) - gt_pos_index
+        pred_pos_index = set(prediction_df[prediction_df==1].index)
+        pred_neg_index = set(prediction_df[prediction_df!=1].index)
+        TP_index = gt_pos_index & pred_pos_index
+        FP_index = pred_pos_index - gt_pos_index
+        FN_index = gt_pos_index - pred_pos_index
+        TN_index = gt_neg_index & pred_neg_index
+        TP, FP, TN, FN = len(TP_index), len(FP_index), len(TN_index), len(FN_index)
+        if verbose: 
+            return {"true_pos": TP_index, "true_neg": TN_index, "false_pos": FP_index, "false_neg": FN_index}
+        return {"precision": TP/(TP+FP),
+                "recall": TP/(TP+FN),
+                "accuracy": (TP+TN)/(TP+TN+FP+FN),
+                "true_pos": TP,
+                "false_pos": FP,
+                "true_neg": TN,
+                "false_neg": FN}
+        
+    def get_weather_label(self)->pd.Series:
         pass 
+    
+    
