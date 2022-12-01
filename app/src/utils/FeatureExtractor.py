@@ -4,8 +4,9 @@ from src.utils.PathManager import Paths as Path
 from typing import Sequence, Callable, List
 from itertools import groupby
 from scipy.interpolate import CubicSpline, interp1d 
-from sklearn.metrics import max_error, mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import max_error, mean_absolute_error, mean_squared_error
 from sklearn.linear_model import LinearRegression
+from functools import cached_property
 
 def get_absolute_minimum(y:list)->float:
     y = np.array(y)
@@ -79,12 +80,27 @@ class FeatureExtractor_:
     def get_integral_feature(cls, agg_df:pd.DataFrame, feature:str) ->pd.Series:
         return agg_df[feature].apply(lambda x: np.trapz(x))
     
+    @staticmethod
+    def upper_IQR(x):
+        return np.nanquantile(x, 0.75)
+    
+    @staticmethod
+    def lower_IQR(x):
+        return np.nanquantile(x, 0.25)
+    
     @classmethod
     def get_relative_performance(cls, agg_df:pd.DataFrame, feature:str, window:int=30, method:str="max")->pd.Series:
-        method_dict = {"max":np.nanmax, "min":np.nanmin, "median":np.nanmedian, "mean":np.nanmean}
+        method_dict = {"max":np.nanmax, "min":np.nanmin, "median":np.nanmedian, "mean":np.nanmean, "upper_IQR":cls.upper_IQR, "lower_IQR":cls.lower_IQR}
         rolling_window = get_rolling_window(agg_df, feature, window)
         reference = rolling_window.apply(method_dict[method])
         return agg_df[feature]/reference
+    
+    @classmethod 
+    def get_difference_performance(cls, agg_df:pd.DataFrame, feature:str, window:int=30, method:str="max")->pd.Series:
+        method_dict = {"max":np.nanmax, "min":np.nanmin, "median":np.nanmedian, "mean":np.nanmean, "upper_IQR":cls.upper_IQR, "lower_IQR":cls.lower_IQR}
+        rolling_window = get_rolling_window(agg_df, feature, window)
+        reference = rolling_window.apply(method_dict[method])
+        return agg_df[feature]-reference
     
     @classmethod
     def get_interpolated_feature(cls, agg_df:pd.DataFrame, feature:str, method:str='linear')->pd.Series:
@@ -100,9 +116,53 @@ class FeatureExtractor_:
         data[feature] = data.apply(lambda x: interpolate(x),raw=False,axis=1)
         return data[feature]
     
+    @staticmethod 
+    def get_outage_length(x:pd.Series)->pd.Series:
+        zero_length = [len(list(g)) for k,g in groupby(x) if k==0] 
+        if len(zero_length)==0:
+            return 0
+        return max(zero_length)
+    
     @classmethod
     def get_gradient_feature(cls, agg_df:pd.DataFrame, feature:str)->pd.Series:
         return agg_df[feature].apply(lambda x: np.gradient(x))
+    
+    @classmethod
+    def get_linear_model_metrics(cls, data:pd.Series)->tuple:
+        Y = np.array(data['ROC_VOLTAGE'])
+        X = np.arange(len(Y))
+        mask = np.array(data['Mask_ROC_VOLTAGE'])
+        Y_ = Y[mask==1].reshape(-1,1)
+        X_ = X[mask==1].reshape(-1,1)
+        if len(Y_)<=0.10*len(Y):
+            return {"max_error": None, "mae": None, "mse": None}
+        reg = LinearRegression().fit(X_,Y_)
+        Y_pred = reg.predict(X_)
+        max_e = max_error(Y_,Y_pred)
+        mae_e = mean_absolute_error(Y_,Y_pred)
+        mse_e = mean_squared_error(Y_,Y_pred)
+        return {"max_error": max_e, "mae":mae_e, "mse":mse_e}
+    
+    @classmethod
+    def get_linear_model_night_metrics(cls, data:pd.Series)->tuple:
+        Y = np.array(data['ROC_VOLTAGE'][1000:])
+        X = np.arange(len(Y))
+        mask = np.array(data['Mask_ROC_VOLTAGE'][1000:])
+        Y_ = Y[mask==1].reshape(-1,1)
+        X_ = X[mask==1].reshape(-1,1)
+        if len(Y_)<=0.10*len(Y):
+            return {"max_error": None, "mae": None, "mse": None}
+        reg = LinearRegression().fit(X_,Y_)
+        Y_pred = reg.predict(X_)
+        max_e = max_error(Y_,Y_pred)
+        mae_e = mean_absolute_error(Y_,Y_pred)
+        mse_e = mean_squared_error(Y_,Y_pred)
+        return {"max_error": max_e, "mae":mae_e, "mse":mse_e}
+    
+    @classmethod
+    def get_max_feature_dawn(cls, data:pd.Series)->tuple:
+        data = np.array(data)[1000:]
+        return data.max()
     
 class IntervalUtility:
     def __init__(self, threshold:float, start:float=600, end:float=1200, feature:str="ROC_VOLTAGE", min_length:int=60):
@@ -208,12 +268,13 @@ class IntervalUtility:
         return int(sup_lb < inf_ub)
     
 class FeatureExtractor(FeatureExtractor_):
-    def __init__(self, well_code:str, feature:str="ROC_VOLTAGE", 
+    def __init__(self, well_code:str,
                  operation_correction_dict:dict={"gradient_threshold":0.025,"start":600,"end":1200},
-                 anomaly_detection_dict:dict={"missing_rate":0.8},
-                 data_outage_detection_dict:dict={"start":1000, "end":1400, "min_length":60, "missing_rate":0.8},
+                 anomaly_detection_dict:dict={"missing_length":180},
+                 data_outage_detection_dict:dict={"start":1000, "end":1400, "min_length":60, "missing_length":180},
                  dawn_VOLTAGE_drop_detection_dict:dict={"first_derivative_threshold":0.4, "second_derivative_threshold":0.4,"use_second_derivative":True},
-                 charging_fault_detection_dict:dict={"max_error_threshold":0.08, "mean_absolute_error_threshold":0.02,"mean_squared_error_threshold":0.008,"r2_threshold":0.7},
+                 charging_fault_detection_dict:dict={"max_error_threshold":0.08, "mean_absolute_error_threshold":0.02,"mean_squared_error_threshold":0.008,\
+                                                     "start":1000, "gradient_threshold":0.003},
                  weather_detection_dict:dict={"end":400,"quantile":0.85,"weather_threshold":0.98,"window":30},
                  )->None:
         self._verify_operation_correction_dict(operation_correction_dict)
@@ -225,9 +286,133 @@ class FeatureExtractor(FeatureExtractor_):
         self.well_code = well_code
         self.loader = DataLoader()
         self.data = self.get_data()
-        self.feature = feature
-        self.interpolated_data = self.get_interpolated_feature(self.data['agg_df'],self.feature).to_frame()
     
+    @cached_property
+    def max_outage_length(self)->pd.Series:
+        mask_VOLTAGE = self.data['agg_df']['Mask_ROC_VOLTAGE']
+        return mask_VOLTAGE.apply(lambda x: self.get_outage_length(x))
+    
+    @cached_property
+    def max_outage_length_dawn(self)->pd.Series:
+        mask_VOLTAGE = self.data['agg_df']['Mask_ROC_VOLTAGE']
+        return mask_VOLTAGE.apply(lambda x: self.get_outage_length(x[1000:]))
+        
+    @cached_property
+    def max_outage_length_morning(self)->pd.Series:
+        mask_VOLTAGE = self.data['agg_df']['Mask_ROC_VOLTAGE']
+        return mask_VOLTAGE.apply(lambda x: self.get_outage_length(x[:400]))
+    
+    @cached_property
+    def interpolated_VOLTAGE(self)->pd.DataFrame:
+        return self.get_interpolated_feature(self.data['agg_df'],"ROC_VOLTAGE").to_frame()
+    
+    @cached_property
+    def integral_VOLTAGE_morning(self)->pd.Series:
+        result = self.interpolated_VOLTAGE.apply(lambda x: np.trapz(x['ROC_VOLTAGE'][:400]),axis=1)
+        result.name = "ROC_VOLTAGE"
+        return result
+    
+    @cached_property
+    def integral_VOLTAGE_ratio_morning(self)->pd.Series:
+        result = self.get_relative_performance(self.integral_VOLTAGE_morning.to_frame(), "ROC_VOLTAGE",30,"upper_IQR")
+        result.name = "ROC_VOLTAGE"
+        return result
+    
+    @cached_property
+    def first_derivative(self)->pd.Series:
+        return self.get_gradient_feature(self.interpolated_VOLTAGE, "ROC_VOLTAGE")
+    
+    @cached_property
+    def second_derivative(self)->pd.Series: 
+        return self.get_gradient_feature(self.first_derivative.to_frame(), "ROC_VOLTAGE")
+    
+    @cached_property
+    def lm_VOLTAGE_metrics(self)->pd.DataFrame:
+        df=self.data["agg_df"].apply(lambda x: self.get_linear_model_metrics(x), axis=1,raw=False)
+        return df.apply(pd.Series)
+    
+    @cached_property
+    def lm_VOLTAGE_night_metrics(self)->pd.DataFrame:
+        df=self.data["agg_df"].apply(lambda x: self.get_linear_model_night_metrics(x), axis=1,raw=False)
+        return df.apply(pd.Series)
+    
+    @cached_property
+    def max_gradient_dawn(self)->pd.Series:
+        return self.first_derivative.apply(lambda x: self.get_max_feature_dawn(x))
+        
+    @cached_property
+    def anomaly_label(self)->pd.Series:
+        return self.get_data_anomaly_label()
+    
+    @cached_property
+    def corrected_VOLTAGE(self)->pd.Series:
+        interpolated_feature = self.interpolated_VOLTAGE
+        gradient = self.first_derivative
+        region_identifier = IntervalUtility(self.operation_correction_dict['gradient_threshold'], self.operation_correction_dict['start'], self.operation_correction_dict['end'])
+        interpolated_feature['correction_region'] = gradient.apply(lambda x: region_identifier.get_correction_region(x))
+        corrected_VOLTAGE = interpolated_feature.apply(lambda x: region_identifier.correct(x),axis=1,raw=False)
+        corrected_VOLTAGE.name = "ROC_VOLTAGE"
+        return corrected_VOLTAGE
+    
+    @cached_property
+    def min_VOLTAGE(self)->pd.Series:
+        return self.get_minimum_feature(self.corrected_VOLTAGE.to_frame(),"ROC_VOLTAGE")
+    
+    @cached_property
+    def min_VOLTAGE_ratio_upper_IQR(self)->pd.Series:
+        return self.get_relative_performance(self.min_VOLTAGE.to_frame(),"ROC_VOLTAGE",30,"upper_IQR")
+    
+    @cached_property
+    def min_VOLTAGE_ratio_median(self)->pd.Series:
+        return self.get_relative_performance(self.min_VOLTAGE.to_frame(),"ROC_VOLTAGE",30,"median")
+    
+    @cached_property
+    def min_VOLTAGE_ratio_mean(self)->pd.Series:
+        return self.get_relative_performance(self.min_VOLTAGE.to_frame(),"ROC_VOLTAGE",30,"mean")
+    
+    @cached_property
+    def min_VOLTAGE_ratio_max(self)->pd.Series:
+        return self.get_relative_performance(self.min_VOLTAGE.to_frame(),"ROC_VOLTAGE",30,"max")
+    
+    @cached_property
+    def min_VOLTAGE_drop_upper_IQR(self)->pd.Series:
+        return self.get_difference_performance(self.min_VOLTAGE.to_frame(), "ROC_VOLTAGE",30,"upper_IQR")
+    
+    @cached_property
+    def min_VOLTAGE_drop_median(self)->pd.Series:
+        return self.get_difference_performance(self.min_VOLTAGE.to_frame(), "ROC_VOLTAGE",30,"median")
+    
+    @cached_property
+    def min_VOLTAGE_drop_mean(self)->pd.Series:
+        return self.get_difference_performance(self.min_VOLTAGE.to_frame(), "ROC_VOLTAGE",30,"mean")
+    
+    @cached_property
+    def min_VOLTAGE_drop_max(self)->pd.Series:
+        return self.get_difference_performance(self.min_VOLTAGE.to_frame(), "ROC_VOLTAGE",30,"max")
+    
+    @cached_property
+    def min_VOLTAGE_IQR_difference(self)->pd.Series:
+        rolling_window = get_rolling_window(self.min_VOLTAGE, "ROC_VOLTAGE", 30)
+        lower_IQR = rolling_window.apply(self.lower_IQR)
+        upper_IQR = rolling_window.apply(self.upper_IQR)
+        return upper_IQR - lower_IQR
+        
+    @cached_property
+    def min_VOLTAGE_drop_ratio_upper_IQR(self)->pd.Series:
+        return self.min_VOLTAGE_drop_upper_IQR/self.min_VOLTAGE_IQR_difference
+    
+    @cached_property
+    def min_VOLTAGE_drop_ratio_median(self)->pd.Series:
+        return self.min_VOLTAGE_drop_median/self.min_VOLTAGE_IQR_difference
+    
+    @cached_property
+    def min_VOLTAGE_drop_ratio_mean(self)->pd.Series:
+        return self.min_VOLTAGE_drop_ratio_mean/self.min_VOLTAGE_IQR_difference
+    
+    @cached_property
+    def min_VOLTAGE_drop_ratio_max(self)->pd.Series:
+        return self.min_VOLTAGE_drop_max/self.min_VOLTAGE_IQR_difference
+        
     def _verify_operation_correction_dict(self, data_dict:dict)->None:
         gradient_threshold = 0.025 if 'gradient_threshold' not in data_dict else data_dict['gradient_threshold']
         start = 600 if 'start' not in data_dict else data_dict['start']
@@ -238,12 +423,12 @@ class FeatureExtractor(FeatureExtractor_):
         min_length = 60 if 'min_length' not in data_dict else data_dict['min_length']
         start = 1000 if 'start' not in data_dict else data_dict['start']
         end = 1200 if 'end' not in data_dict else data_dict['end']
-        missing_rate = 0.8 if "missing_rate" not in data_dict else data_dict['missing_rate']
-        self.data_outage_detection_dict={"min_length":min_length, "start":start, "end":end, "missing_rate":missing_rate}
+        missing_length = 180 if "missing_length" not in data_dict else data_dict['missing_length']
+        self.data_outage_detection_dict={"min_length":min_length, "start":start, "end":end, "missing_length":missing_length}
         
     def _verify_anomaly_detection_dict(self, data_dict:dict)->None:
-        missing_rate = 0.8 if "missing_rate" not in data_dict else data_dict['missing_rate']
-        self.anomaly_detection_dict={"missing_rate":missing_rate}
+        missing_length = 180 if "missing_length" not in data_dict else data_dict['missing_length']
+        self.anomaly_detection_dict={"missing_length":missing_length}
     
     def _verify_dawn_VOLTAGE_drop_detection_dict(self, data_dict:dict)->None:
         first_derivative_threshold=0.4 if "first_derivative_threshold" not in data_dict else data_dict['first_derivative_threshold']
@@ -255,8 +440,11 @@ class FeatureExtractor(FeatureExtractor_):
         max_error_threshold = 0.08 if "max_error_threshold" not in data_dict else data_dict["max_error_threshold"]
         mean_absolute_error_threshold= 0.02 if "mean_absolute_error_threshold" not in data_dict else data_dict["mean_absolute_error_threshold"]
         mean_squared_error_threshold=0.008 if "mean_squared_error_threshold" not in data_dict else data_dict["mean_squared_error_threshold"]
-        r2_threshold=0.7 if "r2_threshold" not in data_dict else data_dict["r2_threshold"]
-        self.charging_fault_detection_dict = {"max_error_threshold":max_error_threshold,"mean_absolute_error_threshold":mean_absolute_error_threshold,"mean_squared_error_threshold":mean_squared_error_threshold,"r2_threshold":r2_threshold}
+        gradient_threshold = 0.025 if 'gradient_threshold' not in data_dict else data_dict['gradient_threshold']
+        start = 1000 if 'start' not in data_dict else data_dict['start']
+        self.charging_fault_detection_dict = {"max_error_threshold":max_error_threshold,"mean_absolute_error_threshold":mean_absolute_error_threshold,
+                                              "mean_squared_error_threshold":mean_squared_error_threshold,
+                                              "start":start, "gradient_threshold":gradient_threshold}
     
     def _verify_weather_detection_dict(self, data_dict:dict)->None:
         end=400 if "end" not in data_dict else data_dict["end"]
@@ -268,26 +456,20 @@ class FeatureExtractor(FeatureExtractor_):
     def get_data(self)->dict[str,pd.DataFrame]:
         return self.loader.get_data(self.well_code)
         
-    def get_operation_corrected_feature(self)->pd.Series:
-        agg_df = self.data['agg_df']
-        interpolated_feature = self.get_interpolated_feature(agg_df, self.feature, "linear").to_frame()
-        gradient = self.get_gradient_feature(interpolated_feature, self.feature)
-        region_identifier = IntervalUtility(self.operation_correction_dict['gradient_threshold'], self.operation_correction_dict['start'], self.operation_correction_dict['end'])
-        interpolated_feature['correction_region'] = gradient.apply(lambda x: region_identifier.get_correction_region(x))
-        return interpolated_feature.apply(lambda x: region_identifier.correct(x),axis=1,raw=False)
-    
     def get_data_anomaly_label(self)->pd.Series:
         """Assign data anomaly label based on rate of missing ROC_VOLTAGE data 
         
         Args - embedded in anomaly_detection_dict
-            missing_rate (float): fraction of missing data in a day for it to be considered data anomaly. Defaults to 0.8
+            missing_length (int): threshold length of continuous missing data for it to be considered anomaly. Defaults to 180 or 3 hours.
 
         Returns:
             pd.Series: 0 - not abnormal, 1 - data anomaly 
         """
-        VOLTAGE_data = self.data['agg_df']['Mask_ROC_VOLTAGE']
-        return VOLTAGE_data.apply(lambda x: int((1-sum(x)/len(x))>=self.anomaly_detection_dict['missing_rate']))
+        anomaly_label =  self.max_outage_length >= self.anomaly_detection_dict["missing_length"]
+        anomaly_label.name = "labels"
+        return anomaly_label
     
+    #TODO 
     def get_data_outage_failure_label(self)->pd.Series:
         """Check for presence of battery failure that cause data outage for all tags.
         
@@ -304,7 +486,7 @@ class FeatureExtractor(FeatureExtractor_):
             start (float, optional): index of the start of evening. Defaults to 600.
             end (float, optional): index of the end of evening and early morning. Defaults to 1400.
             min_count (int, optional): minumum number of minutes in an outage event for it to be classified as data outage. Defaults to 60 mins = 1 hour.
-            missing_rate (float, optional): fraction of missing ROC_VOLTAGE data for a day to be considered abnormal. Defaults to 0.8 - If 80% of data is missing -> Data Anomaly
+            missing_length (int, optional): length of continuous missing ROC_VOLTAGE data for a day to be considered abnormal. Defaults to 180 mins or 3 hours
 
         Returns:
             pd.Series: label - 0: no failure, 1: has failure, 2: uncertain/data anomaly
@@ -329,14 +511,14 @@ class FeatureExtractor(FeatureExtractor_):
             return IntervalUtility.verify_intersection([x['VOLTAGE_interval'],x['FLOW_interval'],x['PRESSURE_interval']])
         
         #Post Processing - remove labels caused by data anomaly - i.e. long periods of missing ROC_VOLTAGE data
-        outage_label_df = temp_df.apply(lambda x: label_outage(x), raw=False,axis=1)
-        anomaly_label = self.get_data_anomaly_label()
+        outage_label = temp_df.apply(lambda x: label_outage(x), raw=False,axis=1)
+        anomaly_label = self.anomaly_label
 
         anomaly_index = anomaly_label[anomaly_label==1].index
-        outage_label_df[outage_label_df.index.isin(anomaly_index)]=2
-        
-        return outage_label_df
-        
+        outage_label[outage_label.index.isin(anomaly_index)]=2
+        outage_label.name = "labels"
+        return outage_label
+    
     def get_dawn_VOLTAGE_drop_failure_label(self)->pd.Series: 
         """Check for presence of battery failure that cause a sharp drop in ROC_VOLTAGE before dawn. 
         
@@ -350,13 +532,13 @@ class FeatureExtractor(FeatureExtractor_):
         Returns:
             pd.Series: failure label. 0 - no failure, 1 - failure present 
         """
-        first_derivative = self.get_gradient_feature(self.interpolated_data, self.feature)
-        first_derivative_label = first_derivative.apply(lambda x: int(np.any(np.abs(x[600:1400])>=self.dawn_VOLTAGE_drop_detection_dict['first_derivative_threshold'])))
+        label = self.first_derivative.apply(
+            lambda x: int(np.any(np.abs(x[600:1400])>=self.dawn_VOLTAGE_drop_detection_dict['first_derivative_threshold'])))        
         if self.dawn_VOLTAGE_drop_detection_dict['use_second_derivative']:
-            second_derivative = self.get_gradient_feature(first_derivative.to_frame(), self.feature)
-            second_derivative_label = second_derivative.apply(lambda x: int(np.any(np.abs(x[600:1400])>=self.dawn_VOLTAGE_drop_detection_dict['second_derivative_threshold'])))
-            return first_derivative_label*second_derivative_label
-        return first_derivative_label
+            label *= self.second_derivative.apply(
+                lambda x: int(np.any(np.abs(x[600:1400])>=self.dawn_VOLTAGE_drop_detection_dict['second_derivative_threshold'])))
+        label.name = "label"
+        return label
     
     def get_charging_fault_label(self)->pd.Series:
         """Get charging fault label.
@@ -368,35 +550,48 @@ class FeatureExtractor(FeatureExtractor_):
             max_error_threshold (float): max error 
             mean_squared_error_threshold (float): mse threshold 
             mean_absolute_error_threshold (float): mae threshold
-            r2_threshold (float): r2 score threshold
 
         Returns:
             pd.Series: 0 - no charging fault, 1 - charging fault, 2 - data anomaly 
         """
+        lm_metric = self.lm_VOLTAGE_metrics[self.anomaly_label==0]
+        lm_metric_night = self.lm_VOLTAGE_night_metrics[self.anomaly_label==0]
+        gradient_dawn = self.max_gradient_dawn[self.anomaly_label==0]
+
+        def compare_metrics(x:pd.Series)->pd.Series:
+            if x['max_error'] is not None and x['mae'] is not None and x['mse'] is not None:
+                return (x['max_error'] <= self.charging_fault_detection_dict['max_error_threshold']) and \
+                       (x["mae"] <= self.charging_fault_detection_dict["mean_absolute_error_threshold"]) and \
+                       (x["mse"] <= self.charging_fault_detection_dict['mean_squared_error_threshold'])
+                       
+        lm_label = lm_metric.apply(lambda x: compare_metrics(x), axis=1,raw=False)
+        lm_label_night = lm_metric_night.apply(lambda x: compare_metrics(x), axis=1, raw=False)
+        gradient_label = gradient_dawn.apply(lambda x: x<=self.charging_fault_detection_dict["gradient_threshold"])
+        lm_label[(gradient_label==1)|(lm_label==1)|(lm_label_night==1)]=1
+        lm_label.name = "labels"
+        return lm_label
+    
+    def get_weather_label(self)->pd.Series:
+        """Get weather label.
         
-        df = self.data['agg_df']
-        
-        def get_charging_fault_label_(data):
-            Y = np.array(data['ROC_VOLTAGE'])
-            X = np.arange(len(Y))
-            mask = np.array(data['Mask_ROC_VOLTAGE'])
-            Y_ = Y[mask==1].reshape(-1,1)
-            X_ = X[mask==1].reshape(-1,1)
-            if len(Y_)<=0.10*len(Y):
-                return 2 
-            reg = LinearRegression().fit(X_,Y_)
-            Y_pred = reg.predict(X_)
-            max_e = max_error(Y_,Y_pred)
-            mae_e = mean_absolute_error(Y_,Y_pred)
-            mse_e = mean_squared_error(Y_,Y_pred)
-            r2_e = r2_score(Y_,Y_pred)
-            return int((max_e <= self.charging_fault_detection_dict['max_error_threshold']) and
-                       (mae_e<= self.charging_fault_detection_dict['mean_absolute_error_threshold']) and
-                       (mse_e<= self.charging_fault_detection_dict['mean_squared_error_threshold']) and
-                       (r2_e>=self.charging_fault_detection_dict['r2_threshold']))
-            
-        #Post Processing - remove labels caused by data anomaly - i.e. long periods of missing ROC_VOLTAGE data
-        return df.apply(lambda x: get_charging_fault_label_(x),axis=1,raw=False)
+        Achieved by comparing the ratio of the integral of the day period (specified by config kwd "end") over the benchmark 
+        in a specified window length (controlled by config kwd "window") against a specific weather threshold.
+
+        Args: embedded in weather_detection_dict
+            end (int|Optional) - index of end of day. Defaults to 400
+            window (int|Optional) - window length of review. Defaults to 30 days.
+            quantile (float|Optional) - quantile at which the day in window is considered a benchmark. Defaults to 0.85
+            weather_threshold (float|Optional) - weather threshold ratio
+        Returns:
+            pd.Series: weather label 
+        """
+        ratio = self.integral_VOLTAGE_ratio_morning[self.anomaly_label==0]
+        label = (ratio<=self.weather_detection_dict["weather_threshold"]).astype(int)
+        label.name = "labels"
+        return label
+    
+    def get_cloud_cover_ratio(self)->pd.Series:
+        return self.integral_VOLTAGE_ratio_morning
     
     def evaluate_labeller(self, prediction_df:pd.Series, verbose:bool=False, positive_labels:Sequence[int]=[2,5])->dict:
         """Get confusion matrix evaluation for a given prediction dataframe
@@ -425,38 +620,15 @@ class FeatureExtractor(FeatureExtractor_):
         TP, FP, TN, FN = len(TP_index), len(FP_index), len(TN_index), len(FN_index)
         if verbose: 
             return {"true_pos": TP_index, "true_neg": TN_index, "false_pos": FP_index, "false_neg": FN_index}
-        return {"precision": TP/(TP+FP),
-                "recall": TP/(TP+FN),
-                "accuracy": (TP+TN)/(TP+TN+FP+FN),
-                "true_pos": TP,
-                "false_pos": FP,
-                "true_neg": TN,
-                "false_neg": FN}
+        try:
+            return {"precision": TP/(TP+FP),
+                    "recall": TP/(TP+FN),
+                    "accuracy": (TP+TN)/(TP+TN+FP+FN),
+                    "true_pos": TP,
+                    "false_pos": FP,
+                    "true_neg": TN,
+                    "false_neg": FN}
+        except:
+            return{"true_pos":TP, "false_pos":FP, "true_neg":TN, "false_neg":FN}
         
-    def get_weather_label(self)->tuple[pd.Series,pd.Series]:
-        """Get weather label and percentage cloud_cover.
-        
-        Achieved by comparing the ratio of the integral of the day period (specified by config kwd "end") over the benchmark 
-        in a specified window length (controlled by config kwd "window") against a specific weather threshold.
-
-        Args: embedded in weather_detection_dict
-            end (int|Optional) - index of end of day. Defaults to 400
-            window (int|Optional) - window length of review. Defaults to 30 days.
-            quantile (float|Optional) - quantile at which the day in window is considered a benchmark. Defaults to 0.85
-            weather_threshold (float|Optional) - weather threshold ratio
-        Returns:
-            tuple[pd.Series]: weather label and fractional cloud-cover
-        """
-        data_anomaly_label = self.get_data_anomaly_label()
-        normal_date = data_anomaly_label[data_anomaly_label==0].index
-        V_interp_data = self.interpolated_data['ROC_VOLTAGE'].loc[normal_date]
-        morning_V_integral = V_interp_data.apply(lambda x: np.trapz(x[:self.weather_detection_dict["end"]]))
-
-
-        def get_upper_IQR(x):
-            return np.quantile(x,self.weather_detection_dict["quantile"])
-        rolling_median = morning_V_integral.rolling(window=self.weather_detection_dict["window"]).apply(get_upper_IQR)
-        ratio = morning_V_integral/rolling_median
-        return (ratio<=self.weather_detection_dict["weather_threshold"]).astype(int)
-    
     
