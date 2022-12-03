@@ -6,7 +6,7 @@ import pandas as pd
 
 _UTIL_PATH = Path(__file__)
 
-class Paths:
+class PathManager:
     UTILS_PATH = _UTIL_PATH
     BASE_PATH = UTILS_PATH.parents[3]
     DATA_PATH = BASE_PATH / "data"

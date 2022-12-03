@@ -2,7 +2,7 @@
 
 import numpy as np
 import pandas as pd
-from src.utils.PathManager import Paths as Path 
+from src.utils.PathManager import PathManager as Path 
 
 class BayesianLabeler:
     def __init__(self,well_cd:str, 

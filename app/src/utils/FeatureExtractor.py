@@ -1,9 +1,9 @@
 import numpy as np
 import pandas as pd
-from src.utils.PathManager import Paths as Path 
+from src.utils.PathManager import PathManager as Path
 from typing import Sequence, Callable, List
 from itertools import groupby
-from scipy.interpolate import CubicSpline, interp1d 
+from src.utils.ModelUtils import FolderUtils, PlotUtils
 from sklearn.metrics import max_error, mean_absolute_error, mean_squared_error
 from sklearn.linear_model import LinearRegression
 from functools import cached_property
@@ -144,7 +144,7 @@ class FeatureExtractor_:
         return {"max_error": max_e, "mae":mae_e, "mse":mse_e}
     
     @classmethod
-    def get_linear_model_night_metrics(cls, data:pd.Series)->tuple:
+    def get_linear_model_night_metrics(cls, data:pd.Series)->tuple:  
         Y = np.array(data['ROC_VOLTAGE'][1000:])
         X = np.arange(len(Y))
         mask = np.array(data['Mask_ROC_VOLTAGE'][1000:])
@@ -270,12 +270,12 @@ class IntervalUtility:
 class FeatureExtractor(FeatureExtractor_):
     def __init__(self, well_code:str,
                  operation_correction_dict:dict={"gradient_threshold":0.025,"start":600,"end":1200},
-                 anomaly_detection_dict:dict={"missing_length":180},
-                 data_outage_detection_dict:dict={"start":1000, "end":1400, "min_length":60, "missing_length":180},
+                 anomaly_detection_dict:dict={"missing_length":360},
+                 data_outage_detection_dict:dict={"start":600, "end":1400, "min_length":60, "missing_length":180},
                  dawn_VOLTAGE_drop_detection_dict:dict={"first_derivative_threshold":0.4, "second_derivative_threshold":0.4,"use_second_derivative":True},
                  charging_fault_detection_dict:dict={"max_error_threshold":0.08, "mean_absolute_error_threshold":0.02,"mean_squared_error_threshold":0.008,\
                                                      "start":1000, "gradient_threshold":0.003},
-                 weather_detection_dict:dict={"end":400,"quantile":0.85,"weather_threshold":0.98,"window":30},
+                 weather_detection_dict:dict={"end":400,"quantile":0.85,"weather_threshold":0.96,"window":30},
                  )->None:
         self._verify_operation_correction_dict(operation_correction_dict)
         self._verify_anomaly_detection_dict(anomaly_detection_dict)
@@ -392,7 +392,7 @@ class FeatureExtractor(FeatureExtractor_):
     
     @cached_property
     def min_VOLTAGE_IQR_difference(self)->pd.Series:
-        rolling_window = get_rolling_window(self.min_VOLTAGE, "ROC_VOLTAGE", 30)
+        rolling_window = get_rolling_window(self.min_VOLTAGE.to_frame(), "ROC_VOLTAGE", 30)
         lower_IQR = rolling_window.apply(self.lower_IQR)
         upper_IQR = rolling_window.apply(self.upper_IQR)
         return upper_IQR - lower_IQR
@@ -455,7 +455,8 @@ class FeatureExtractor(FeatureExtractor_):
     
     def get_data(self)->dict[str,pd.DataFrame]:
         return self.loader.get_data(self.well_code)
-        
+    
+    #TESTED   
     def get_data_anomaly_label(self)->pd.Series:
         """Assign data anomaly label based on rate of missing ROC_VOLTAGE data 
         
@@ -519,7 +520,8 @@ class FeatureExtractor(FeatureExtractor_):
         outage_label.name = "labels"
         return outage_label
     
-    def get_dawn_VOLTAGE_drop_failure_label(self)->pd.Series: 
+    #OLD
+    def get_dawn_VOLTAGE_drop_failure_label_deprecated(self)->pd.Series: 
         """Check for presence of battery failure that cause a sharp drop in ROC_VOLTAGE before dawn. 
         
         This method computes the first and second derivatives and assigns labels by thresholding. This method works on interpolated data. 
@@ -537,9 +539,33 @@ class FeatureExtractor(FeatureExtractor_):
         if self.dawn_VOLTAGE_drop_detection_dict['use_second_derivative']:
             label *= self.second_derivative.apply(
                 lambda x: int(np.any(np.abs(x[600:1400])>=self.dawn_VOLTAGE_drop_detection_dict['second_derivative_threshold'])))
-        label.name = "label"
+        label.name = "labels"
         return label
     
+    def get_dawn_VOLTAGE_drop_failure_label(self)->pd.Series: 
+        """Check for presence of battery failure that cause a sharp drop in ROC_VOLTAGE before dawn. 
+        
+        This method computes the first and second derivatives and assigns labels by thresholding. This method works on interpolated data. 
+        
+        Args: embedded in dawn_VOLTAGE_drop_detection_dict
+            first_derivative_threshold (float, optional): threshold of the first derivative. Defaults to 0.4.
+            second_derivative_threshold (float, optional): threshold of the second derivative. Defaults to 0.4.
+            use_second_derivate (bool, optional): whether to use 2nd derivative to derive label. Defaults to True.
+
+        Returns:
+            pd.Series: failure label. 0 - no failure, 1 - failure present 
+        """
+        data = self.interpolated_VOLTAGE.ROC_VOLTAGE
+        def get_shifted_gradient(x,k):
+            return x[600:1400]-x[600-k:1400-k]
+        shift_one = data.apply(lambda x: get_shifted_gradient(x,1)).apply(lambda x: np.abs(x).max() <= 0.05)
+        shift_two = data.apply(lambda x: get_shifted_gradient(x,2)).apply(lambda x: np.abs(x).max() <= 0.05)
+        shift_three = data.apply(lambda x: get_shifted_gradient(x,3)).apply(lambda x: np.abs(x).max() <= 0.05)
+        label = shift_one[shift_one|shift_two|shift_three].astype(int)
+        label.name = "labels"
+        return label
+    
+    #TESTED
     def get_charging_fault_label(self)->pd.Series:
         """Get charging fault label.
         
@@ -571,6 +597,7 @@ class FeatureExtractor(FeatureExtractor_):
         lm_label.name = "labels"
         return lm_label
     
+    #TESTED
     def get_weather_label(self)->pd.Series:
         """Get weather label.
         
@@ -590,6 +617,7 @@ class FeatureExtractor(FeatureExtractor_):
         label.name = "labels"
         return label
     
+    #TESTED
     def get_cloud_cover_ratio(self)->pd.Series:
         return self.integral_VOLTAGE_ratio_morning
     
@@ -631,4 +659,22 @@ class FeatureExtractor(FeatureExtractor_):
         except:
             return{"true_pos":TP, "false_pos":FP, "true_neg":TN, "false_neg":FN}
         
+    def get_diagnostic_plots(self, label_type)->None:
+        label_map = {"weather":(self.get_weather_label,9),
+                      "charging_fault":(self.get_charging_fault_label,6),
+                      "dawn_VOLTAGE_drop":(self.get_dawn_VOLTAGE_drop_failure_label,[2,5]),
+                      "dawn_data_outage":(self.get_data_outage_failure_label,[2,5]),
+                      "data_anomaly":(self.get_data_anomaly_label,8)}
+        if label_type not in label_map:
+            raise KeyError(f"label_type must be one of {list(label_map.keys())}")
+        folder_manager = FolderUtils(self.well_code, label_type)
+        folder_manager.clear_path()
+        preds = label_map[label_type][0]()
+        target_label = label_map[label_type][1]
+        label_dict = PlotUtils.get_label_dict(self.data["label_df"],preds.to_frame(),target_label)
+        plot_windows = PlotUtils.get_plot_window(label_dict)
+        for i in range(len(plot_windows)):
+            plot_name, plot = PlotUtils.get_diagnostic_plots(self.data["raw_df"], label_dict, plot_windows,i,self.well_code)
+            plot_name = plot_name + f"_{label_type}.png"
+            plot.savefig(folder_manager.parent_dir/plot_name)
     
