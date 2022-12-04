@@ -7,6 +7,8 @@ from src.utils.ModelUtils import FolderUtils, PlotUtils
 from sklearn.metrics import max_error, mean_absolute_error, mean_squared_error
 from sklearn.linear_model import LinearRegression
 from functools import cached_property
+from scipy.signal import savgol_filter    
+
 
 def get_absolute_minimum(y:list)->float:
     y = np.array(y)
@@ -210,7 +212,12 @@ class IntervalUtility:
             data[interval[0]:interval[1]] = data[interval[0]:interval[1]]+dV
         return data
     
-    def get_largest_outage_interval(self, mask:pd.Series, start:float, end:float)->tuple:
+    @classmethod
+    def get_largest_outage_interval(cls,
+                                    mask:pd.Series, 
+                                    start:float, 
+                                    end:float,
+                                    min_length:int)->tuple:
         """Get (start,end) tuple specifying the longest consecutive zeros in a sequence
 
         Args:
@@ -221,13 +228,12 @@ class IntervalUtility:
         Returns:
             tuple: (start, end) if valid. None if either there is no 0 in mask or if mask is None
         """
-                
-        if mask is None:
-            return None
         mask = np.array(mask[start:end])
         index = 0
         zero_index = []
         zero_length = [] 
+        
+        #Get index and length of consecutive zero sequences
         for mask_val,mask_group in groupby(mask):
             new_length = len(list(mask_group))
             if mask_val == 0: 
@@ -237,15 +243,17 @@ class IntervalUtility:
         zero_index = np.array(zero_index)
         zero_length = np.array(zero_length)
 
-        zero_index = zero_index[zero_length >= self.min_length]
-        zero_length = zero_length[zero_length >= self.min_length]
+        #Filter out short outages
+        zero_index = zero_index[zero_length >= min_length]
+        zero_length = zero_length[zero_length >= min_length]
 
-        if len(zero_length) == 0:
+        #Handle edege cases
+        if len(zero_length) == 0: #No outage
             return None 
-        if len(zero_length) >= 0.8*len(mask):
-            return None 
+
+        #Get longest zero sequence
         index = np.argmax(zero_length)
-        start_index = zero_index[index]
+        start_index = zero_index[index] + start
         end_index = start_index + zero_length[index]
         return start_index, end_index
 
@@ -266,12 +274,11 @@ class IntervalUtility:
         sup_lb = lb.max()
         inf_ub = ub.min()
         return int(sup_lb < inf_ub)
-    
 class FeatureExtractor(FeatureExtractor_):
     def __init__(self, well_code:str,
                  operation_correction_dict:dict={"gradient_threshold":0.025,"start":600,"end":1200},
                  anomaly_detection_dict:dict={"missing_length":360},
-                 data_outage_detection_dict:dict={"start":600, "end":1400, "min_length":60, "missing_length":180},
+                 data_outage_detection_dict:dict={"start":1100, "end":1440, "min_length":60, "missing_length":20},
                  dawn_VOLTAGE_drop_detection_dict:dict={"first_derivative_threshold":0.4, "second_derivative_threshold":0.4,"use_second_derivative":True},
                  charging_fault_detection_dict:dict={"max_error_threshold":0.08, "mean_absolute_error_threshold":0.02,"mean_squared_error_threshold":0.008,\
                                                      "start":1000, "gradient_threshold":0.003},
@@ -291,17 +298,7 @@ class FeatureExtractor(FeatureExtractor_):
     def max_outage_length(self)->pd.Series:
         mask_VOLTAGE = self.data['agg_df']['Mask_ROC_VOLTAGE']
         return mask_VOLTAGE.apply(lambda x: self.get_outage_length(x))
-    
-    @cached_property
-    def max_outage_length_dawn(self)->pd.Series:
-        mask_VOLTAGE = self.data['agg_df']['Mask_ROC_VOLTAGE']
-        return mask_VOLTAGE.apply(lambda x: self.get_outage_length(x[1000:]))
-        
-    @cached_property
-    def max_outage_length_morning(self)->pd.Series:
-        mask_VOLTAGE = self.data['agg_df']['Mask_ROC_VOLTAGE']
-        return mask_VOLTAGE.apply(lambda x: self.get_outage_length(x[:400]))
-    
+           
     @cached_property
     def interpolated_VOLTAGE(self)->pd.DataFrame:
         return self.get_interpolated_feature(self.data['agg_df'],"ROC_VOLTAGE").to_frame()
@@ -470,8 +467,32 @@ class FeatureExtractor(FeatureExtractor_):
         anomaly_label.name = "labels"
         return anomaly_label
     
-    #TODO 
-    def get_data_outage_failure_label(self)->pd.Series:
+    #TESTED
+    def get_dawn_data_outage_feature(self)->pd.Series:
+        outage_length = self.max_outage_length
+        normal_days = outage_length[outage_length <= 0.8*1440].index
+        FLOW_data = self.data['agg_df']['Mask_FLOW'].loc[normal_days]
+        PRESSURE_data = self.data['agg_df']['Mask_PRESSURE_TH'].loc[normal_days] if 'Mask_PRESSURE_TH' in self.data['agg_df'] else None 
+
+        temp_df = pd.DataFrame()
+
+        temp_df['FLOW_interval'] = FLOW_data.apply(lambda x: 
+                                                IntervalUtility.get_largest_outage_interval(x,
+                                                                self.data_outage_detection_dict['start'], 
+                                                                self.data_outage_detection_dict['end'],
+                                                                self.data_outage_detection_dict['missing_length']))
+        if PRESSURE_data is not None:
+            temp_df['PRESSURE_interval'] = PRESSURE_data.apply(lambda x: 
+                                                    IntervalUtility.get_largest_outage_interval(x,
+                                                                    self.data_outage_detection_dict['start'], 
+                                                                    self.data_outage_detection_dict['end'],
+                                                                    self.data_outage_detection_dict['missing_length']))
+        else:
+            temp_df['PRESSURE_interval'] = 0
+        return temp_df
+
+    #TESTED
+    def get_dawn_data_outage_label(self):
         """Check for presence of battery failure that cause data outage for all tags.
         
         In many wells, failures right before dawn correspond to a gap in all tag records (ROC_VOLTAGE, FLOW, PRESSURE_TH) in the same period.
@@ -492,36 +513,57 @@ class FeatureExtractor(FeatureExtractor_):
         Returns:
             pd.Series: label - 0: no failure, 1: has failure, 2: uncertain/data anomaly
         """
-        VOLTAGE_data = self.data['agg_df']['Mask_ROC_VOLTAGE']
-        FLOW_data = self.data['agg_df']['Mask_FLOW']
-        PRESSURE_data = self.data['agg_df']['Mask_PRESSURE_TH'] if 'Mask_PRESSURE_TH' in self.data['agg_df'] else None 
-        
-        labeler = IntervalUtility(threshold=0.05,start=self.data_outage_detection_dict['start'],
-                                  end=self.data_outage_detection_dict['end'],
-                                  min_length=self.data_outage_detection_dict['min_length'])
-        temp_df = pd.DataFrame()
-        temp_df['VOLTAGE_interval'] = VOLTAGE_data.apply(lambda x: labeler.get_largest_outage_interval(x, self.data_outage_detection_dict['start'], self.data_outage_detection_dict['end']))
-        temp_df['FLOW_interval'] = FLOW_data.apply(lambda x: labeler.get_largest_outage_interval(x, self.data_outage_detection_dict['start'], self.data_outage_detection_dict['end']))
-        temp_df['PRESSURE_interval'] = PRESSURE_data.apply(lambda x: labeler.get_largest_outage_interval(x, self.data_outage_detection_dict['start'], self.data_outage_detection_dict['end'])) if PRESSURE_data is not None else None 
+        #Remove days when data is completely missing: 
+        temp_df = self.get_dawn_data_outage_feature()
         
         def label_outage(x:pd.Series)->pd.Series:
-            if x['VOLTAGE_interval'] is None:
-                return 2 
-            if x['PRESSURE_interval'] is None and x['FLOW_interval'] is None:
-                return 2 
-            return IntervalUtility.verify_intersection([x['VOLTAGE_interval'],x['FLOW_interval'],x['PRESSURE_interval']])
-        
-        #Post Processing - remove labels caused by data anomaly - i.e. long periods of missing ROC_VOLTAGE data
-        outage_label = temp_df.apply(lambda x: label_outage(x), raw=False,axis=1)
-        anomaly_label = self.anomaly_label
+            if (x['FLOW_interval'] is None) or (x['PRESSURE_interval'] is None): #No missing -> normal data
+                return 0 
+            if isinstance(x["PRESSURE_interval"],int):
+                return 2
+            return IntervalUtility.verify_intersection([x['FLOW_interval'],x['PRESSURE_interval']])
 
-        anomaly_index = anomaly_label[anomaly_label==1].index
-        outage_label[outage_label.index.isin(anomaly_index)]=2
-        outage_label.name = "labels"
-        return outage_label
+        label = temp_df.apply(lambda x: label_outage(x), raw=False,axis=1)
+        label.name = "labels"
+        
+        #Post processing for high voltage: 
+        min_VOLTAGE = self.min_VOLTAGE.mean()
+        if min_VOLTAGE < 19:
+            cut_off = 12
+        else: 
+            cut_off = 22.5
+        low_VOLTAGE_dates = self.min_VOLTAGE[self.min_VOLTAGE<=cut_off].index
+        non_anommaly_dates = self.anomaly_label[self.anomaly_label==0].index
+        label = label.loc[list(set(non_anommaly_dates)&set(low_VOLTAGE_dates))]
+        return label
+        
+    #TESTED
+    def get_dawn_VOLTAGE_drop_features(self)->pd.DataFrame:
+        data = self.data["agg_df"].ROC_VOLTAGE
+        data = data[self.anomaly_label==0]
+        def process_fn(x):
+            x = np.array(x)[600:]
+            x = x[x!=0]
+            filter_data = savgol_filter(savgol_filter(x, window_length=10, polyorder=2),window_length=10,polyorder=1)
+            first_derivative = np.gradient(filter_data)
+            second_derivative = np.gradient(first_derivative)
+            onset_location = np.where((second_derivative>=0.002) & (first_derivative>=0.005))[0]
+            if len(onset_location)==0:
+                onset_location=len(first_derivative)
+            else:
+                onset_location=onset_location[0]
+            
+            return {"filtered_data": filter_data,
+                    "first":first_derivative,
+                    "second":second_derivative,
+                    "filtered_data_onset":filter_data[:onset_location], 
+                    "first_onset":first_derivative[:onset_location], 
+                    "second_onset":second_derivative[:onset_location]}
+        all_data = data.apply(lambda x: process_fn(x)).apply(pd.Series)
+        return all_data
     
-    #OLD
-    def get_dawn_VOLTAGE_drop_failure_label_deprecated(self)->pd.Series: 
+    #TESTED
+    def get_dawn_VOLTAGE_drop_label(self)->pd.Series: 
         """Check for presence of battery failure that cause a sharp drop in ROC_VOLTAGE before dawn. 
         
         This method computes the first and second derivatives and assigns labels by thresholding. This method works on interpolated data. 
@@ -534,34 +576,27 @@ class FeatureExtractor(FeatureExtractor_):
         Returns:
             pd.Series: failure label. 0 - no failure, 1 - failure present 
         """
-        label = self.first_derivative.apply(
-            lambda x: int(np.any(np.abs(x[600:1400])>=self.dawn_VOLTAGE_drop_detection_dict['first_derivative_threshold'])))        
-        if self.dawn_VOLTAGE_drop_detection_dict['use_second_derivative']:
-            label *= self.second_derivative.apply(
-                lambda x: int(np.any(np.abs(x[600:1400])>=self.dawn_VOLTAGE_drop_detection_dict['second_derivative_threshold'])))
+        min_VOLTAGE = self.min_VOLTAGE.mean()
+        if min_VOLTAGE < 19:
+            cut_off = 11.8
+        else: 
+            cut_off = 22.5
+        low_VOLTAGE_dates = self.min_VOLTAGE[self.min_VOLTAGE<=cut_off].index
+
+        all_data = self.get_dawn_VOLTAGE_drop_features()
+        label = all_data["first_onset"].apply(lambda x: x[-20:].min()<-0.05)
+        label = label.loc[list(set(label.index)&set(low_VOLTAGE_dates))]
         label.name = "labels"
         return label
-    
-    def get_dawn_VOLTAGE_drop_failure_label(self)->pd.Series: 
-        """Check for presence of battery failure that cause a sharp drop in ROC_VOLTAGE before dawn. 
-        
-        This method computes the first and second derivatives and assigns labels by thresholding. This method works on interpolated data. 
-        
-        Args: embedded in dawn_VOLTAGE_drop_detection_dict
-            first_derivative_threshold (float, optional): threshold of the first derivative. Defaults to 0.4.
-            second_derivative_threshold (float, optional): threshold of the second derivative. Defaults to 0.4.
-            use_second_derivate (bool, optional): whether to use 2nd derivative to derive label. Defaults to True.
 
-        Returns:
-            pd.Series: failure label. 0 - no failure, 1 - failure present 
-        """
-        data = self.interpolated_VOLTAGE.ROC_VOLTAGE
-        def get_shifted_gradient(x,k):
-            return x[600:1400]-x[600-k:1400-k]
-        shift_one = data.apply(lambda x: get_shifted_gradient(x,1)).apply(lambda x: np.abs(x).max() <= 0.05)
-        shift_two = data.apply(lambda x: get_shifted_gradient(x,2)).apply(lambda x: np.abs(x).max() <= 0.05)
-        shift_three = data.apply(lambda x: get_shifted_gradient(x,3)).apply(lambda x: np.abs(x).max() <= 0.05)
-        label = shift_one[shift_one|shift_two|shift_three].astype(int)
+    #TODO
+    def get_min_VOLTAGE_label(self)->pd.Series:
+        mean_min_V = self.min_VOLTAGE.mean()
+        if mean_min_V < 19:
+            cut_off = 11.0
+        else:
+            cut_off = 22
+        label = (self.min_VOLTAGE <= cut_off).astype(int)
         label.name = "labels"
         return label
     
@@ -621,6 +656,29 @@ class FeatureExtractor(FeatureExtractor_):
     def get_cloud_cover_ratio(self)->pd.Series:
         return self.integral_VOLTAGE_ratio_morning
     
+    def get_failure_label(self)->pd.Series:
+        dawn_VOLTAGE_drop_label = self.get_dawn_VOLTAGE_drop_label()
+        dawn_VOLTAGE_drop_label = dawn_VOLTAGE_drop_label[dawn_VOLTAGE_drop_label==1].index
+        
+        dawn_data_outage_label = self.get_dawn_data_outage_label()
+        dawn_data_outage_label = dawn_data_outage_label[dawn_data_outage_label==1].index
+        
+        min_VOLTAGE_label = self.get_min_VOLTAGE_label()
+        min_VOLTAGE_label = min_VOLTAGE_label[min_VOLTAGE_label==1].index
+        
+        charge_fault_label = self.get_charging_fault_label()
+        charge_fault_label = charge_fault_label[charge_fault_label==1].index
+        
+        positive_label = sorted((set(dawn_data_outage_label)|set(dawn_VOLTAGE_drop_label)|set(min_VOLTAGE_label)) - set(charge_fault_label))
+        negative_label = sorted(set(self.anomaly_label.index) - set(positive_label))
+        all_labels = sorted(set(positive_label)|set(negative_label))
+        label = pd.Series(index = all_labels, dtype=int)
+        label.name = "labels"
+        label.loc[positive_label]=1
+        label.loc[negative_label]=0
+        return label
+        
+    
     def evaluate_labeller(self, prediction_df:pd.Series, verbose:bool=False, positive_labels:Sequence[int]=[2,5])->dict:
         """Get confusion matrix evaluation for a given prediction dataframe
 
@@ -662,8 +720,10 @@ class FeatureExtractor(FeatureExtractor_):
     def get_diagnostic_plots(self, label_type)->None:
         label_map = {"weather":(self.get_weather_label,9),
                       "charging_fault":(self.get_charging_fault_label,6),
-                      "dawn_VOLTAGE_drop":(self.get_dawn_VOLTAGE_drop_failure_label,[2,5]),
-                      "dawn_data_outage":(self.get_data_outage_failure_label,[2,5]),
+                      "dawn_VOLTAGE_drop":(self.get_dawn_VOLTAGE_drop_label,[2,5]),
+                      "dawn_data_outage":(self.get_dawn_data_outage_label,[2,5]),
+                      "min_VOLTAGE": (self.get_min_VOLTAGE_label,[2,5]),
+                      "failure_label": (self.get_failure_label, [2,5]),
                       "data_anomaly":(self.get_data_anomaly_label,8)}
         if label_type not in label_map:
             raise KeyError(f"label_type must be one of {list(label_map.keys())}")
@@ -677,4 +737,14 @@ class FeatureExtractor(FeatureExtractor_):
             plot_name, plot = PlotUtils.get_diagnostic_plots(self.data["raw_df"], label_dict, plot_windows,i,self.well_code)
             plot_name = plot_name + f"_{label_type}.png"
             plot.savefig(folder_manager.parent_dir/plot_name)
+            
+        eval=self.evaluate_labeller(preds,verbose=True,positive_labels=target_label)
+        FN=sorted(list(set(eval['false_neg']) - set(self.anomaly_label[self.anomaly_label==1].index)))
+        anomaly = sorted(list(set(eval['false_neg']) & set(self.anomaly_label[self.anomaly_label==1].index)))
+        FP=sorted(list(eval['false_pos']))
+        metrics = {d.strftime("%Y-%m-%d"):"false negative" for d in FN}
+        metrics.update({d.strftime("%Y-%m-%d"):"false positive" for d in FP})
+        metrics.update({d.strftime("%Y-%m-%d"):"anomaly" for d in anomaly})
+        df = pd.DataFrame({"Date":metrics.keys(), "Type": metrics.values()})
+        df.to_csv(folder_manager.parent_dir/f"metrics_{self.well_code}.csv",index=False)
     
