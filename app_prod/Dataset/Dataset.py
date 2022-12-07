@@ -15,6 +15,22 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 class PROCESSOR_MIXIN:
+    @classmethod 
+    def extract_time_period(cls, data:pd.DataFrame)->tuple:
+        """Extract the start and end timestamps from a given dataset. 
+        start timestamp is rounded down to the nearest %Y-%m-%d 00:00:00
+        end timestamp is rounded up to the nearest %Y-%m-%d 23:59
+
+        Args:
+            data (pd.DataFrame): _description_
+
+        Returns:
+            tuple: start and end timestamps 
+        """
+        start = data.index.min().replace(hour=0,minute=0)
+        end = data.index.max().replace(hour=23,minute=59)
+        return start, end 
+    
     @classmethod
     def fill_missing_date(cls, data: pd.DataFrame, start:str, end:str) -> pd.DataFrame:
         """Fill minutely missing timestamps
@@ -27,7 +43,7 @@ class PROCESSOR_MIXIN:
         Returns:
             pd.DataFrame: dataframe with nan values for missing time gaps 
         """
-        index = pd.date_range(start,end,"T")
+        index = pd.date_range(start,end,freq="T")
         return data.reindex(index)
         
     @classmethod 
@@ -49,6 +65,30 @@ class PROCESSOR_MIXIN:
         return data.loc[:,features]
     
     @classmethod 
+    def create_mask_and_fill_nan(cls, data: pd.DataFrame, features: Sequence[str], fill_method:str="interpolate") -> pd.DataFrame:
+        """Create a binary mask for each feature describing whether the data point at corresponding mask is raw or interpolated 
+
+        Args:
+            data (pd.DataFrame): input dataframe 
+            features (Sequence[str]): relevant features for modelling purposes 
+            fill_method (str, optional): how to fill nan values - either zero or interpolate
+
+        Returns:
+            pd.DataFrame: new data frame with mask and nan value filled 
+        """
+        for feature in features: 
+            data[f'Mask_{feature}']=1-data[feature].isna()
+            if fill_method == "zero":
+                data[feature] = data[feature].fillna(value=0)
+            else:
+                data[feature] = data[feature].interpolate(method='linear', limit_direction='both')    
+        return data         
+    
+    @classmethod 
+    def normalise_data(cls, data:pd.DataFrame, normalise_params)->pd.DataFrame:
+        return data
+    
+    @classmethod 
     def aggregate_data(cls, data: pd.DataFrame) -> pd.DataFrame: 
         """Aggregate data so that each row contains a list of 1440 data points
 
@@ -60,13 +100,25 @@ class PROCESSOR_MIXIN:
         """
         return data.groupby(data.index.date).agg(list)
     
-    @classmethod 
-    def create_mask_and_fill_nan(cls, data: pd.DataFrame, features: Sequence[str], fill_method:str="interpolate") -> pd.DataFrame:
-        pass 
-    
     @classmethod
-    def process_data(cls, data: pd.DataFrame, start:str, end:str, features: Sequence[str]) -> pd.DataFrame:
-        pass 
+    def process_data(cls, data: pd.DataFrame, features: Sequence[str], fill_method:str, normalise_params:dict) -> pd.DataFrame:
+        """Apply transformation on unprocessed data 
+
+        Args:
+            data (pd.DataFrame): raw dataframe with index as date-time objects 
+            features (Sequence[str]): relevant features to select from data.
+            fill_method (str): method to fill nan values 
+            normalise_params (dict): normalisation parameters 
+
+        Returns:
+            pd.DataFrame: processed data frame 
+        """
+        start, end = cls.extract_time_period(data)
+        data = cls.fill_missing_date(data, start, end)
+        data = cls.select_features(data, features)
+        data = cls.create_mask_and_fill_nan(data, features, fill_method)
+        data = cls.normalise_data(data, normalise_params)
+        return cls.aggregate_data(data)
     
 class FILENAMING_MIXIN:
     """A utility object:
@@ -208,7 +260,10 @@ class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
                  connection: AAUConnection, 
                  path:str, 
                  file_prefix:str, 
-                 file_suffix:str, 
+                 file_suffix:str,
+                 features:Sequence[str], 
+                 fill_method:str="zero",
+                 normalise_params:dict=None,
                  datetime_index_column:str="TS",
                  **kwargs) -> None:
         self.connection = connection 
@@ -216,6 +271,9 @@ class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
         self.path = path
         self.file_prefix = file_prefix
         self.file_suffix = file_suffix
+        self.features = features
+        self.fill_method = fill_method 
+        self.normalise_params = normalise_params
         self.datetime_index_column = datetime_index_column
         self.kwargs = {"path":self.path, "partition_mode":self.partition_mode}
         self.extract_keyword(kwargs)
@@ -286,6 +344,7 @@ class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
                 if end_datetime <= file_end:
                     start_, end_ = self.get_output_time_slice(end_datetime.replace(day=1), end_datetime, strp_format)
                     result = result.loc[result.TS[result.TS<=end_].index,:]
+                result.set_index("TS",inplace=True)
                 response[file_name] = result
             except Exception as e:
                 raise e 
@@ -294,8 +353,7 @@ class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
         if concat:
             try:
                 all_output = [data for data in response.values() if data is not None]
-                all_df =  pd.concat(all_output,axis=0,ignore_index=True)
-                all_df.set_index("TS",inplace=True)
+                all_df =  pd.concat(all_output,axis=0,ignore_index=False)
                 return all_df
             except Exception as e:
                 logger.error(e)
@@ -359,7 +417,7 @@ class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
             well_df = self.read_data(well, start, end, concat=True, strp_format=strp_format, strf_format=strf_format)
             if well_df is not None: 
                 well_df['WELL_CD'] = well
-                all_wells[well]=well_df
+                all_wells[well]=self.process_data(well_df, self.features, self.fill_method, self.normalise_params)
             else:
                 all_wells[well]=None
         return all_wells
@@ -370,7 +428,7 @@ if __name__ == "__main__":
     connection = aauconnect_(config['cfg_file_info'])
     
     dataset = Dataset(connection, path="C:/Users/HoangLe/Desktop/Consilium_ROC_HOANG/app_prod/roc/PROCESSED_DATA",
-                      file_prefix="ROC_PROCESSED_DATA",file_suffix=".csv",bucket=config['cfg_s3_info']['bucket'])
+                      file_prefix="ROC_PROCESSED_DATA",file_suffix=".csv",bucket=config['cfg_s3_info']['bucket'], features=['ROC_VOLTAGE','FLOW','PRESSURE_TH'])
     data_dict = dataset.read_data("ACRUS1","2016-11-04","2016-11-05",True)
     print("End")
     
