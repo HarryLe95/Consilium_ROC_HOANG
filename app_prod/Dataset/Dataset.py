@@ -337,15 +337,16 @@ class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
             kwargs['file']=file_name
             try:
                 result = self.connection.read(sql=None, args={}, edit=[], orient='df', do_raise=False, **kwargs)
-                result["TS"] = pd.to_datetime(result["TS"])
-                if start_datetime >= file_start: 
-                    start_,_ = self.get_output_time_slice(start_datetime, file_end,strp_format)
-                    result = result.loc[result.TS[result.TS >=start_].index,:]            
-                if end_datetime <= file_end:
-                    start_, end_ = self.get_output_time_slice(end_datetime.replace(day=1), end_datetime, strp_format)
-                    result = result.loc[result.TS[result.TS<=end_].index,:]
-                result.set_index("TS",inplace=True)
-                response[file_name] = result
+                if result is not None:
+                    result["TS"] = pd.to_datetime(result["TS"])
+                    if start_datetime >= file_start: 
+                        start_,_ = self.get_output_time_slice(start_datetime, file_end,strp_format)
+                        result = result.loc[result.TS[result.TS >=start_].index,:]            
+                    if end_datetime <= file_end:
+                        start_, end_ = self.get_output_time_slice(end_datetime.replace(day=1), end_datetime, strp_format)
+                        result = result.loc[result.TS[result.TS<=end_].index,:]
+                    result.set_index("TS",inplace=True)
+                    response[file_name] = result
             except Exception as e:
                 raise e 
 
