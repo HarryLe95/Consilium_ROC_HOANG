@@ -319,7 +319,7 @@ class FeatureExtractor:
     def get_days_to_load_off(self)->pd.Series:
         threshold = 11 if self.min_VOLTAGE.mean() <= 19 else 22 
         regression = RWLS(threshold, 0.25, 2)
-        return regression(self.min_VOLTAGE)
+        return self.min_VOLTAGE.rolling(window=15, min_periods=3).apply(lambda x: regression(x))
     
     def _verify_operation_correction_dict(self, data_dict:dict)->None:
         gradient_threshold = 0.025 if 'gradient_threshold' not in data_dict else data_dict['gradient_threshold']

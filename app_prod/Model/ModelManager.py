@@ -31,13 +31,13 @@ class ModelManager:
                     "FAILURE_DESCRIPTION":"",
                     "SEVERITY_LEVEL":0,
                     "SEVERITY_CATEGORY":"Normal",
-                    "VOLT_MAX":-1,
-                    "VOLT_MIN":-1,
+                    "VOLTAGE_MAX":-1,
+                    "VOLTAGE_MIN":-1,
                     "CHARGE_VOLTS":-1,
                     "NO_CHARGE":"F",
                     "INSUFFICIENT_CHARGE":"F",
-                    "HIGH_VOLAGE": "F", #TODO
-                    "VOLAGE_CAUSED_OUTAGE": "F", #TODO
+                    "HIGH_VOLTAGE": "F", #TODO
+                    "VOLTAGE_CAUSED_OUTAGE": "F", #TODO
                     "CURENT_OUTAGE": "F", #TODO 
                     "DAYS_TO_LOAD_OFF": 30,
                     "DOWNTIME_PERCENT": "", #TODO 
@@ -46,14 +46,15 @@ class ModelManager:
                     "SENSOR_FAULT":"F",
                     "DEAD_CELL":"F"}
         status = 0
+        exception_message = None
         trend_date = self.get_trend_date()
         try: 
-            response["TREND_DATE"] = trend_date 
-            response["WELL_STATUS"] = self.FLOW_STATUS[self.feature_extractor.get_well_status()]
+            response["TREND_DATE"] = trend_date.strftime("%Y-%m-%d %H:%M")
+            response["WELL_STATUS"] = self.FLOW_STATUS[self.feature_extractor.get_well_status().loc[trend_date]]
             response["VOLTAGE_MAX"] = self.feature_extractor.max_VOLTAGE.loc[trend_date]
-            response["VOLAGE_MIN"] = self.feature_extractor.min_VOLTAGE.loc[trend_date]
+            response["VOLTAGE_MIN"] = self.feature_extractor.min_VOLTAGE.loc[trend_date]
             response["CHARGE_VOLTS"] = self.feature_extractor.charge_VOLTAGE.loc[trend_date]
-            response["DAYS_TO_LOAD_OFF"] = self.feature_extractor.get_days_to_load_off[trend_date]
+            response["DAYS_TO_LOAD_OFF"] = self.feature_extractor.get_days_to_load_off()[trend_date]
             
             #Handle Failure Category and Failure Description
             anomaly_label = self.feature_extractor.anomaly_label.loc[trend_date]
@@ -89,9 +90,10 @@ class ModelManager:
             else:
                 response["SEVERITY_LEVEL"] = 5
                 response["SEVERITY_CATEGORY"]="Immediate actions required"
-        except:
+        except Exception as e:
+            exception_message = e
             status = 1
-        return status, response 
+        return {"inference_status":status, "body": response, "message": exception_message} 
         
 
 #Quick Test with dummy data

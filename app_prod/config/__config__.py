@@ -2,12 +2,14 @@
 Created on Tue Aug 30 2022
 @author: Steve Lechowicz
 """
+from utils.PathManager import PathManager
+
 def init():
     base = {
         '_type' : 'file',
         '_info': {
             'connection_type' : 'file',
-            'path' : 'C:/Users/HoangLe/Desktop/Consilium_ROC_HOANG/app_prod/config',
+            'path' : PathManager.CONFIG_PATH,
             'file' : 'config.csv',
             'partition_mode' : None
         },

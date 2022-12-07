@@ -98,7 +98,10 @@ class PROCESSOR_MIXIN:
         Returns:
             pd.DataFrame: aggregated dataframe
         """
-        return data.groupby(data.index.date).agg(list)
+        data = data.groupby(data.index.date).agg(list)
+        data.index = pd.to_datetime(data.index)
+        data.index.name = "TS"
+        return data
     
     @classmethod
     def process_data(cls, data: pd.DataFrame, features: Sequence[str], fill_method:str, normalise_params:dict) -> pd.DataFrame:
@@ -338,14 +341,14 @@ class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
             try:
                 result = self.connection.read(sql=None, args={}, edit=[], orient='df', do_raise=False, **kwargs)
                 if result is not None:
-                    result["TS"] = pd.to_datetime(result["TS"])
+                    result[self.datetime_index_column] = pd.to_datetime(result[self.datetime_index_column])
+                    result.set_index(self.datetime_index_column,inplace=True)
                     if start_datetime >= file_start: 
                         start_,_ = self.get_output_time_slice(start_datetime, file_end,strp_format)
-                        result = result.loc[result.TS[result.TS >=start_].index,:]            
+                        result = result.loc[start_:,:]            
                     if end_datetime <= file_end:
                         start_, end_ = self.get_output_time_slice(end_datetime.replace(day=1), end_datetime, strp_format)
-                        result = result.loc[result.TS[result.TS<=end_].index,:]
-                    result.set_index("TS",inplace=True)
+                        result = result.loc[:end_,:]
                     response[file_name] = result
             except Exception as e:
                 raise e 

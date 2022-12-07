@@ -7,7 +7,7 @@ _UTIL_PATH = Path(__file__)
 
 class PathManager:
     UTILS_PATH = _UTIL_PATH
-    BASE_PATH = UTILS_PATH.parents[3]
+    BASE_PATH = UTILS_PATH.parents[1]
     DATA_PATH = BASE_PATH / "data"
     CONFIG_PATH = BASE_PATH / "config"
     MODEL_PATH = BASE_PATH /"saved_model"
@@ -104,29 +104,3 @@ class PathManager:
             Path: absolute path to the file locaton
         """
         return cls._file_from_path(cls.LOG_PATH, file_name, sub_folder)
-    
-    @classmethod 
-    def read_config(cls, file_name:str, sub_folder: str|Sequence[str]='')->dict:
-        base = {
-            '_type' : 'file',
-            '_info': {
-                'connection_type' : 'file',
-                'path' : cls.config(file_name,sub_folder).parents[0],
-                'file' : file_name
-            },
-            '_sql': None,
-            '_kwargs': {
-                }
-        }
-        sql = base['_sql']
-        kwargs = base['_kwargs']
-        config = aau.aauconnect_(base['_info']).read(sql=sql, args={}, edit=[], orient='config', do_raise=True, **kwargs)
-        return config 
-
-    @classmethod 
-    def write_config(cls, config:dict|pd.DataFrame, file_name:str,sub_folder:str|Sequence[str]='') -> None:
-        file_path = cls._file_from_path(cls.CONFIG_PATH, file_name, sub_folder)
-        config_df = pd.DataFrame({"KEY":config.keys(),
-                                  "VALUE":config.values(), 
-                                  "TYPE":[type(config[i]).__name__ if config[i] is not None else 'str' for i in config.keys()]})
-        config_df.to_csv(file_path,index=False)
