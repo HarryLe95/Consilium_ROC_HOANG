@@ -15,17 +15,20 @@ class ModelManager:
                              "2": "Insufficient data"}   
     
     FLOW_STATUS = {0: "Shut-In", 1: "Online"} 
+    def __init__(self, **kwargs):
+        self.model_kwargs = kwargs 
     
-    def __init__(self, 
-                 feature_extractor:FeatureExtractor):
-        self.feature_extractor = feature_extractor
-        
-    def get_trend_date(self):
-        return self.feature_extractor.agg_df.index.max()
-        
-    def get_failure_info(self)->dict:
+    @classmethod 
+    def run_inference(cls, inference_data:dict[str,pd.DataFrame])->dict:
+        logger.debug("Running inference for all wells.")
+        all_responses = {}
+        for well in inference_data:
+            inference_df = inference_data[well]
+            all_responses[well] = cls.run_inference_(inference_df)
+        return all_responses
+    
+    def run_inference_(self, inference_df:pd.DataFrame)->dict:
         response = {"TREND_DATE":None,
-                    "WELL_CD":None,
                     "WELL_STATUS":None,
                     "FAILURE_CATEGORY":"Normal", 
                     "FAILURE_DESCRIPTION":"",
@@ -45,21 +48,24 @@ class ModelManager:
                     "NOTIFICATION_FLAG":"F",                    
                     "SENSOR_FAULT":"F",
                     "DEAD_CELL":"F"}
+        if inference_df is None:
+            return {"inference_status":2, "body": None, "message": "Insufficient data for inference"} 
         status = 0
         exception_message = None
-        trend_date = self.get_trend_date()
-        try: 
-            response["TREND_DATE"] = trend_date.strftime("%Y-%m-%d %H:%M")
-            response["WELL_STATUS"] = self.FLOW_STATUS[self.feature_extractor.get_well_status().loc[trend_date]]
-            response["VOLTAGE_MAX"] = self.feature_extractor.max_VOLTAGE.loc[trend_date]
-            response["VOLTAGE_MIN"] = self.feature_extractor.min_VOLTAGE.loc[trend_date]
-            response["CHARGE_VOLTS"] = self.feature_extractor.charge_VOLTAGE.loc[trend_date]
-            response["DAYS_TO_LOAD_OFF"] = self.feature_extractor.get_days_to_load_off()[trend_date]
+        feature_extractor = FeatureExtractor(inference_df, **self.model_kwargs)
+        try:
+            trend_date = feature_extractor.trend_date
+            response["TREND_DATE"] =  trend_date.strftime("%Y-%m-%d %H:%M")
+            response["WELL_STATUS"] = self.FLOW_STATUS[feature_extractor.get_well_status().loc[trend_date]]
+            response["VOLTAGE_MAX"] = feature_extractor.max_VOLTAGE.loc[trend_date]
+            response["VOLTAGE_MIN"] = feature_extractor.min_VOLTAGE.loc[trend_date]
+            response["CHARGE_VOLTS"] = feature_extractor.charge_VOLTAGE.loc[trend_date]
+            response["DAYS_TO_LOAD_OFF"] = feature_extractor.get_days_to_load_off()[trend_date]
             
             #Handle Failure Category and Failure Description
-            anomaly_label = self.feature_extractor.anomaly_label.loc[trend_date]
-            failure_label = self.feature_extractor.get_failure_label().loc[trend_date]
-            charging_fault_label = self.feature_extractor.get_charging_fault_label().loc[trend_date]
+            anomaly_label = feature_extractor.anomaly_label.loc[trend_date]
+            failure_label = feature_extractor.get_failure_label().loc[trend_date]
+            charging_fault_label = feature_extractor.get_charging_fault_label().loc[trend_date]
             
             if anomaly_label: 
                 response["FAILURE_DESCRIPTION"] = "Significant Data Outage. Rerun model inference on this data at another time."
@@ -90,29 +96,8 @@ class ModelManager:
             else:
                 response["SEVERITY_LEVEL"] = 5
                 response["SEVERITY_CATEGORY"]="Immediate actions required"
-        except Exception as e:
-            exception_message = e
+        except Exception as exception_message:
+            logger.log(f"Errors encountered when running inference. Exception encountered: {exception_message}")            
             status = 1
         return {"inference_status":status, "body": response, "message": exception_message} 
         
-
-#Quick Test with dummy data
-if __name__ == "__main__":
-    wells = ["ACRUS1","POND1","POND14"]
-    x = np.linspace(0, 2*np.pi, 1440)
-    sin_wave = np.sin(x)
-    v_data = sin_wave + np.random.normal(0,5,size=(len(wells),1440))
-    v_data = [list(v_data[i,:]) for i in range(len(wells)) ]
-    f_data = 10 + np.random.normal(0,5,size=(len(wells),1440))
-    f_data = [list(f_data[i,:]) for i in range(len(wells))]
-    inference_data = pd.DataFrame.from_dict({"WELL_CD":wells, "ROC_VOLTAGE":v_data, "FLOW": f_data})
-    inference_data = {wells[i]: inference_data.loc[[i],:] for i in range(3)}
-    
-    from Model.testing import Dummy_Classification_Model, Dummy_Regression_Model, Dummy_Feature_Extractor_Model
-    classification_model = Dummy_Classification_Model()
-    regression_model = Dummy_Regression_Model()
-    feature_extractor = Dummy_Feature_Extractor_Model()
-    notification_system = ModelManager(feature_extractor, classification_model, regression_model)
-    df = notification_system.get_all_notifications(inference_data['ACRUS1'])
-    output_dict = notification_system.get_inference_output(inference_data_dict=inference_data)
-    print("End")

@@ -1,5 +1,5 @@
 from Dataset.DataManager import DataManager
-from Dataset.Dataset import Dataset 
+from Dataset.Dataset import DataOperator
 from utils.advancedanalytics_util import aauconnect_
 
 class ROC:
@@ -7,7 +7,8 @@ class ROC:
                  group_config:dict,
                  inference_config:dict, 
                  data_connection_config: dict,
-                 roc_config:dict):
+                 roc_config:dict,
+                 model_config:dict,):
         
         self._validate_group_config(group_config)
         self.group_config = group_config 
@@ -22,8 +23,8 @@ class ROC:
         self._validate_roc_config(roc_config)
         self.roc_config = roc_config 
         
-        self.dataset = Dataset(connection = aauconnect_(self.data_connection_config),**self.data_connection_config, **self.roc_config)
-        self.data_manager = DataManager(wells= self.inference_wells,  dataset=self.dataset, **self.inference_config)
+        self.data_operator = DataOperator(**self.data_connection_config, **self.roc_config)
+        self.data_manager = DataManager(wells= self.inference_wells,  data_operator=self.data_operator, **self.inference_config)
         
     def _validate_inference_config(self, config:dict)->None:
         assert("run_mode" in config), f"inference_info must contain keyword 'run_mode'"
@@ -39,8 +40,14 @@ class ROC:
 
     def _validate_general_connection_config(self, config:dict, parent_config:str)->None:
         assert("connection_type" in config), f"{parent_config} must contain keyword 'connection_type'"
+        if config["connection_type"] == "s3":
+            assert("region" in config), f"{parent_config} must contain keyword 'region' if 'connection_type' is 's3'."
+            assert("user" in config), f"{parent_config} must contain keyword 'user' if 'connection_type' is 's3'."
+            assert("bucket" in config), f"{parent_config} must contain keyword 'bucket' if 'connection_type' is 's3'." 
         assert("path" in config), f"{parent_config}_info must contain keyword 'path'"
         assert("partition_mode" in config), f"{parent_config} must contain keyword 'partition_mode'"
+        if not("tzname" in config):
+            config["tzname"]=None
     
     def _validate_data_connection_config(self, config:dict)->None:
         self._validate_general_connection_config(config, "data_connection_info")
@@ -91,6 +98,12 @@ class ROC:
     def _get_model_training_data(self):
         pass
 
+    def get_inference_dataset(self):
+        return self.data_manager.get_inference_dataset()
+    
+    def run_inference(self):
+        return self.model_manager.run_inference(self.get_inference_dataset())
+    
     def get_nextrun(self, well_cd:str):
         pass
 
@@ -112,26 +125,6 @@ class ROC:
         kwargs = self._config['log_kwargs']
         self._state['log_con'].write(sql=sql, args=record, edit=[], do_raise=True, **kwargs)
 
-    def get_flareline(self, well_cd):
-        well_state = self._state['processed_wells'][well_cd]
-        sql = self._config['flareline_sql']
-        kwargs = self._config['flareline_kwargs']
-        args = {'WELL_CD': well_cd, 'E': well_state['end']}
-        df = self._state['meta_data_con'].read(sql=sql, args=args, edit=[], orient='df', do_raise=False, **kwargs)
-        return df
-
-    def get_tagdata(self, well_cd):
-        well_state = self._state['processed_wells'][well_cd]
-        sql = self._config['tag_data_sql']
-        kwargs = self._config['tag_data_kwargs']
-        if 'file_prefix' in kwargs:
-            kwargs['file_prefix'] = kwargs['file_prefix'].format(well_cd)
-            kwargs['start'] = well_state['start']
-            kwargs['end'] = well_state['end']
-        args = {'WELL_CD': well_cd, 'FLARELINE': well_state['flareline'], 'S': well_state['start'],
-                'E': well_state['end']}
-        df = self._state['input_data_con'].read(sql=sql, args=args, edit=[], orient='df', do_raise=False, **kwargs)
-        return df
 
     def get_eventhistory(self, well_cd):
         well_state = self._state['processed_wells'][well_cd]
@@ -146,64 +139,7 @@ class ROC:
         return df
 
     def run_model_inference(self, model=None, is_validation: bool = False) -> bool:
-        logger.info("Running inference on BDTA model...")
-        model_inference = ModelInference(self._state, self._config, model, is_validation)
-        heuristic_inference = HeuristicInference(self._state, self._config, is_validation)
-        for inference_well in self._gp_info:
-            well_cd = inference_well['WELL_CD']
-            self._state['WELL_CD'] = well_cd
-            if well_cd in self._state['processed_wells']:
-                data = self._state['processed_wells'][well_cd]['lastdata']
-            else:
-                self._state['processed_wells'][well_cd] = {}
-                self._state['processed_wells'][well_cd]['lastdata'] = None
-                self._state['processed_wells'][well_cd]['lastdataend'] = None
-            next_run = self.get_nextrun(well_cd)
-            proc_start = max(
-                [t for t in [next_run['RUN_TSTART'], next_run['BDTA_LAST_RESULT_END'], next_run['BDTA_LAST_EVENT_END']]
-                 if not pd.isnull(t)])
-            proc_end = next_run['RUN_TEND']
-            self._state['processed_wells'][well_cd]['start'] = proc_start
-            self._state['processed_wells'][well_cd]['end'] = proc_end
-            try:
-                flareline_df = self.get_flareline(well_cd)
-                if flareline_df is None or flareline_df.empty():
-                    self._state['processed_wells'][well_cd]['flareline'] = ''
-                else:
-                    recs = flareline_df.to_dict(orient='records')
-                    self._state['processed_wells'][well_cd]['flareline'] = recs[0]['FLARELINE']
-                well_data_df = self.get_tagdata(well_cd)
-                well_data_df.sort_values('TS', inplace=True)
-                well_data_df.drop_duplicates(subset=['TS'], inplace=True)
-                well_data_df.set_index('TS', inplace=True)
-                well_data_df = well_data_df.asfreq('T')
-                well_data_df[['WELL_CD']] = well_data_df[['WELL_CD']].fillna(value=well_cd)
-                well_data_df[['FLARELINE']] = well_data_df[['FLARELINE']].fillna(
-                    value=self._state['processed_wells'][well_cd]['flareline'])
-                well_data_df.reset_index(inplace=True)
-                event_hist_df = self.get_eventhistory(well_cd)
-            except:
-                continue
-            model_inf_df = model_inference.run_model_inference(well_cd, well_data_df)
-            heuristic_inf_ev_df, heuristic_inf_tm_df = heuristic_inference.run_inference(well_cd, well_data_df,
-                                                                                         event_hist_df, model_inf_df)
-            # ensure enough data is processed to overwrite the entire month files
-            # include all events that overlap at the start or end of the month
-            if not heuristic_inf_ev_df.empty:
-                self._store_event_data(heuristic_inf_ev_df)
-                next_run = self._state['processed_wells'][well_cd]['next_run']
-                last_event_end = heuristic_inf_ev_df['EVENT_TS_MAXIMUM'].max()
-                last_event_number = heuristic_inf_ev_df['BDTA_EVENT_NUMBER_COMBINED'].max()
-                next_run['BDTA_LAST_EVENT_END'] = last_event_end
-                next_run['BDTA_LAST_EVENT_NUMBER'] = last_event_number
-                self._state['processed_wells'][well_cd]['next_run'] = next_run
-            if not heuristic_inf_tm_df.empty:
-                print('Timdata')
-                print(heuristic_inf_tm_df)
-                print(heuristic_inf_tm_df.columns)
-                self._store_time_data(heuristic_inf_tm_df)
-            self.store_run_data(well_cd)
-        return True
+        pass
 
 if __name__ == "__main__":
     import config.__config__ as base_config

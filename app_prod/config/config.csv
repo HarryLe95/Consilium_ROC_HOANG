@@ -1,18 +1,16 @@
 KEY,VALUE,TYPE
 application_name,'ROC Config',str
-
-
 inference_info,"{'run_mode' : 'backfill',
                  'backfill_start': '2018-01-01 00:00',
                  'backfill_date_format' : '%Y-%m-%d %H:%M',
                  'inference_window' : 30,
-                 'perform_model_training' : True,
+                 'perform_model_training' : False,
                  'perform_model_inference': True,
                  'datetime_index_column' : 'TS'
                 }",dict
 data_connection_info,"{
                 'connection_type' : 'file',
-                'path' : 'C:/Users/harry/Downloads/Consilium_ROC_HOANG/app_prod/ROC/PROCESSED_DATA',
+                'path' : 'C:/Users/HoangLe/Desktop/Consilium_ROC_HOANG/app_prod/ROC/PROCESSED_DATA',
                 'partition_mode' : None,
                 'file_prefix' : 'ROC_PROCESSED_DATA',
                 'file_suffix' : '.csv'}",dict
@@ -23,7 +21,7 @@ roc_info,"{
           }",dict
 group_info,"{
             'group_connection_info' : {'connection_type' : 'file', 
-			                           'path' : 'C:/Users/harry/Downloads/Consilium_ROC_HOANG/app_prod/config',
+			                           'path' : 'C:/Users/HoangLe/Desktop/Consilium_ROC_HOANG/app_prod/config',
 			                           'file' : 'MODEL_GROUP.csv', 
 			                           'partition_mode' : None},
             'group_sql': 'SELECT * FROM MODEL_GROUP WHERE GROUP_ID = :GROUP_ID',
@@ -40,12 +38,7 @@ cfg_s3_info,"{'connection_type' : 's3',
               'file_prefix' : 'ROC_PROCESSED_DATA',
               'file_suffix' : '.csv',
               'partition_mode' : None}",dict
-cfg_file_info,"{'connection_type' : 'file',
-                'path' : 'C:/Users/HoangLe/app_prod/roc',
-                'partition_mode' : None,
-                'file_prefix' : 'ROC_PROCESSED_DATA',
-                'file_suffix' : '.csv',
-                'partition_mode' : None}",dict
+
 
                 
                 

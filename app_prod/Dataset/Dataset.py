@@ -6,15 +6,24 @@ from copy import deepcopy
 import logging
 
 import pandas as pd 
-import numpy as np 
 
-from Dataset.generic import ABC_Dataset
-from utils.advancedanalytics_util import AAUConnection, S3Connection, FileConnection, AAPandaSQL, aauconnect_
+from utils.advancedanalytics_util import aauconnect_
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 class PROCESSOR_MIXIN:
+    """Utility object that handles data processing and transformation
+
+    Methods:
+        extract_time_period - get start and end timestamps of input data 
+        fill_missing_data - fill missing timestamps in input data from start to end 
+        select_features - select relavent features required for analysis
+        create_mask_and_fill_nan - get mask for missing data features 
+        normalise_data - apply data normalisation 
+        aggregate_data - group data by date and aggregate data within a day to a list 
+        process_data_ - apply all transformation methods sequentially
+    """
     @classmethod 
     def extract_time_period(cls, data:pd.DataFrame)->tuple:
         """Extract the start and end timestamps from a given dataset. 
@@ -57,11 +66,9 @@ class PROCESSOR_MIXIN:
         Returns:
             pd.DataFrame: dataframe with selected features
         """
-        assert "WELL_CD" in data, "Missing well code in dataframe."
-        well_code = np.unique(data["WELL_CD"])
         for feature in features: 
             if feature not in data.columns: 
-                logger.debug(f"Missing feature {feature} for well {well_code}")
+                logger.debug(f"Missing feature {feature}")
         return data.loc[:,features]
     
     @classmethod 
@@ -104,7 +111,7 @@ class PROCESSOR_MIXIN:
         return data
     
     @classmethod
-    def process_data(cls, data: pd.DataFrame, features: Sequence[str], fill_method:str, normalise_params:dict) -> pd.DataFrame:
+    def process_data_(cls, data: pd.DataFrame, features: Sequence[str], fill_method:str, normalise_params:dict) -> pd.DataFrame:
         """Apply transformation on unprocessed data 
 
         Args:
@@ -124,36 +131,44 @@ class PROCESSOR_MIXIN:
         return cls.aggregate_data(data)
     
 class FILENAMING_MIXIN:
-    """A utility object:
+    """Utility object that handles datetime and filenaming
     
     Methods:
-        parse_date: receives an input string and outputs a datetime.datetime object
-        get_filename: receives filename components (well_code,dates,etc) and returns the formatted string of filename 
-        get_metadata_name: receives filename components and returns the formatted string of file metadata
-        get_date_range: output pd.date_range from start to end 
+        parse_date: parse input string to output date object
+        get_filename: parse filename components (well_code,dates,etc) and return the filename 
+        get_metadata_name: parse metadata components and return the file metadata
+        get_date_range: return pd.DatetimeIndex from start to end 
+        get_output_time_slice: return date slices for data fetching
     """
+    #TESTED
     @staticmethod
-    def parse_date(date:str|datetime.datetime, strp_format='%Y-%m-%d') -> datetime.datetime:
-        """Parse str as datetime object
+    def parse_date(date:str|datetime.datetime|datetime.date, strp_format='%Y-%m-%d') -> datetime.date:
+        """Get datetime.date object from input date. If date is a string, parse datestring using format strp_format 
 
         Args:
-            date (str): datestring
+            date (str, datetime.datetime, datetime.date): datestring
             strp_format (str, optional): format. Defaults to '%Y-%m-%d'.
 
         Returns:
-            datetime.datetime: datetime object from date
+            datetime.date: datetime.date object from date
         """
-        try:
-            return datetime.datetime.strptime(date, strp_format)
-        except:
-            raise ValueError(f"Incompatiable input date {date} and format: {strp_format}")
+        if isinstance(date, datetime.datetime):
+            return date.date()
+        if isinstance(date,datetime.date):
+            return date
+        if isinstance(date, str):
+            try:
+                return datetime.datetime.strptime(date, strp_format).date()
+            except:
+                raise ValueError(f"Incompatiable input date {date} and format: {strp_format}")
 
+    #TESTED
     @classmethod
     def get_filename(cls,
                 well_cd:str, 
                 file_prefix:str, 
-                start:datetime.datetime, 
-                end:datetime.datetime,
+                start:datetime.date, 
+                end:datetime.date,
                 strf_format:str='%Y%m%d',
                 file_suffix:str='.csv') -> str:
         """Get filename that adheres to Santos' naming convention
@@ -173,7 +188,8 @@ class FILENAMING_MIXIN:
             str: formatted filename 
         """
         return f"{well_cd}_{file_prefix}_{start.strftime(strf_format)}_{end.strftime(strf_format)}{file_suffix}"
-        
+    
+    #TESTED  
     @classmethod 
     def get_metadata_name(cls,
                 well_cd:str, 
@@ -194,8 +210,11 @@ class FILENAMING_MIXIN:
         """
         return f'{well_cd}_{file_prefix}_LAST{file_suffix}'
     
+    #TESTED
     @classmethod
-    def get_date_range(self, start_date:str, end_date:str, strp_format:str='%Y-%m-%d') -> pd.Series:
+    def get_date_range(self, 
+                       start_date:datetime.date, 
+                       end_date:datetime.date) -> pd.DatetimeIndex:
         """Get a date range from strings specifying the start and end date. 
         
         start_date is rounded down to the first day of the month. end_date is rounded to the first day of next month (if current day is not 1).
@@ -204,15 +223,12 @@ class FILENAMING_MIXIN:
         2017_01_01_2017_02_01 and 2017_02_01_2017_03_01
         
         Args:
-            start_date (str): start date
-            end_date (str): end date
-            strp_format (str): how the start and end date strings should be formatted. Defaults to Y-M-D
+            start_date (datetime.date): start date
+            end_date (datetime.date): end date
 
         Returns:
             pd.Series: date range 
         """
-        start_date = self.parse_date(start_date, strp_format=strp_format)
-        end_date = self.parse_date(end_date, strp_format=strp_format)
         if start_date > end_date: 
             raise ValueError(f"End date {end_date} must come after start date {start_date}.")
         if end_date.day != 1:
@@ -222,11 +238,12 @@ class FILENAMING_MIXIN:
         return pd.date_range(start_date, end_date, freq="MS")
     
     @classmethod
-    def get_output_time_slice(cls, start:str|datetime.date, end:str|datetime.date, strp_format="%Y-%m-%d") -> tuple[str,str]:
-        """Get start and end time for running inference. 
+    def get_output_time_slice(cls, start:datetime.date, end:datetime.date) -> tuple[datetime.datetime,datetime.datetime]:
+        """Get start and end time for running inference. Add time attribute (hour, minute) information to date objects start and end.
         
-        Output the start and end indices for slicing data to get data for inference.  
-                
+        start is promoted as it is (hour=0,minute=0)   
+        end is promoted by subtracting 1 minute from it. - i.e. end = end - timedelta(minute=1)
+          
         Example:
             If today is 3rd of Nov 2022, in live mode (start=2022-11-02, end=2022-11-03), the model runs inference for data 
             on the 2nd of Nov 2022. The output start and end time indices are - '2022-11-02 00:00' and '2022-11-02 23:59'. This means 
@@ -234,33 +251,32 @@ class FILENAMING_MIXIN:
             "2022-11-02 23:59:
 
         Args: 
-            start (str | datetime.date): start date. Yesterday's date in live mode. Output start index = start 
-            end (str | datetime.date): end date. Today's date in live mode. Output end index = end - 1 minute
-            strp_format (str, optional): format of start and end string. Defaults to "%Y-%m-%d".
-
-        Raises:
-            TypeError: if input types are neither string nor datetime.date
+            start (datetime.date): start date. Yesterday's date in live mode. Output start index = start 
+            end (datetime.date): end date. Today's date in live mode. Output end index = end - 1 minute
 
         Returns:
-            tuple[str,str]: start_, end_ time indices 
+            tuple[datetime.datetime,datetime.datetime]: start_, end_ time indices 
         """
         minute_string_format = "%Y-%m-%d %H:%M"
-        def process_date_slices(d:str|datetime.date, offset:timedelta=timedelta(minutes=0)):
-            if not isinstance(d,(str,datetime.date)):
-                raise TypeError(f"Expected type: (str,datetime.date), actual type: {type(d)}")
-            if isinstance(d,str):
-                d = datetime.datetime.strptime(d, strp_format)
-            if isinstance(d,datetime.date): #Convert from datetime.date to datetime.datetime object 
-                d = datetime.datetime.strptime(d.strftime(minute_string_format),minute_string_format) 
-            d = d + offset
-            return d.strftime(minute_string_format)
+        def process_date_slices(d: datetime.date, offset:timedelta=timedelta(minutes=0)) -> datetime.datetime:
+            """Convert datetime.date to datetime.datetime, with the time attribute specified by offset
+
+            Args:
+                d (datetime.date): input datetime.date object 
+                offset (timedelta, optional): the amount of offset. Defaults to timedelta(minutes=0).
+
+            Returns:
+                datetime.datetime: casted datetime.datetime object
+            """
+            d = datetime.datetime.strptime(d.strftime(minute_string_format),minute_string_format) 
+            return d + offset
         start_ = process_date_slices(start)
         end_ = process_date_slices(end, timedelta(minutes=-1))
         return start_, end_
         
-class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
+class DataOperator(PROCESSOR_MIXIN, FILENAMING_MIXIN):
     def __init__(self, 
-                 connection: AAUConnection, 
+                 connection_type: str,
                  path:str, 
                  file_prefix:str, 
                  file_suffix:str,
@@ -268,8 +284,29 @@ class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
                  fill_method:str="zero",
                  normalise_params:dict=None,
                  datetime_index_column:str="TS",
+                 tzname:str=None,
                  **kwargs) -> None:
-        self.connection = connection 
+        """ETL class concerning well tag and metadata. 
+
+        Methods:
+            setup: setup database connection based on specified keywords 
+            read_data: read tag data from database 
+            read_metadata: read metadata from database 
+            process_data: transform raw data for analytic purposes 
+
+        Args:
+            connection_type (str): database connection type. Currently supporting "file" and "s3"
+            path (str): path to tag/metadata
+            file_prefix (str): file prefix
+            file_suffix (str): file suffix
+            features (Sequence[str]): relevant tags for analysis 
+            fill_method (str, optional): method to fill missing data. Either "zero" or "interpolate". Defaults to "zero".
+            normalise_params (dict, optional): normalisation dictionary. Defaults to None.
+            datetime_index_column (str, optional): name of tag column to be treated as datatime index. Defaults to "TS".
+            tzname (str, optional): data time zone. Defaults to None.
+        """
+        self.connection_type = connection_type
+        self.tzname = tzname 
         self.partition_mode = None 
         self.path = path
         self.file_prefix = file_prefix
@@ -279,36 +316,35 @@ class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
         self.normalise_params = normalise_params
         self.datetime_index_column = datetime_index_column
         self.kwargs = {"path":self.path, "partition_mode":self.partition_mode}
-        self.extract_keyword(kwargs)
-        
-    def extract_keyword(self, kwargs:dict) -> None:
-        """Extract relevant keywords from kwargs 
+        self.setup(kwargs)
+
+    def setup(self,kwargs:dict):
+        """Set up aauconnection_ based on connection_type. additional keywords contained in kwargs
 
         Args:
-            kwargs (dict): dictionary containing connection specific keywords 
+            kwargs (dict): additional keywords
+
+        Raises:
+            ValueError: if no connection is setup.
         """
-        if isinstance(self.connection, S3Connection):
-            self.extract_s3_keyword(kwargs)
-        if isinstance(self.connection, FileConnection):
-            self.extract_file_keyword(kwargs) 
-        if isinstance(self.connection, AAPandaSQL):
-            self.extract_sql_keyword(kwargs)
-    
-    def extract_s3_keyword(self,kwargs:dict) -> None:
-        if kwargs is None: 
-            raise KeyError("Additional keywords must be provided for S3 connections. kwargs must include: bucket")
-        try:
+        if self.connection_type == "s3":
             self.bucket = kwargs['bucket']
-        except: 
-            raise KeyError("Bucket must be provided in config")
-        
-    def extract_file_keyword(self,kwargs:dict)-> None:
-        pass 
+            self.region = kwargs['region']
+            self.user   = kwargs['user']
+            self.connection = aauconnect_(info={"connection_type": self.connection_type, 
+                                                "tzname":self.tzname, "bucket":self.bucket, 
+                                                "region":self.region, "user": self.user, 
+                                                "partition_mode":self.partition_mode})
+        if self.connection_type == "file":
+            self.connection = aauconnect_(info={"connection_type": self.connection_type, 
+                                                "tzname": self.tzname, 
+                                                "partition_mode": self.partition_mode})
+        if not hasattr(self, "connection"):
+            logger.error("Data connection uninitialised.")
+            raise ValueError("Data connection uninitialised.")
     
-    def extract_sql_keyword(self, kwargs:dict)-> None:
-        pass 
-    
-    def read_data(self, well_cd:str, start:str, end:str, concat:bool=True, strp_format='%Y-%m-%d',strf_format:str='%Y%m%d') -> dict|pd.DataFrame:
+    #TESTED
+    def read_data(self, well_cd:str, start:str|datetime.date, end:str|datetime.date, concat:bool=True, strp_format='%Y-%m-%d',strf_format:str='%Y%m%d') -> dict|pd.DataFrame:
         """Read well data from database 
         
         Args:
@@ -325,45 +361,52 @@ class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
         Returns:
             dict|pd.DataFrame: output object: dict whose keys are dates and values are the dataframes, or a concatenated dataframe
         """
-        start_datetime = self.parse_date(start)
-        end_datetime = self.parse_date(end)
+        start_datetime = self.parse_date(start, strp_format)
+        end_datetime = self.parse_date(end, strp_format)
         response = {}
-        date_range = self.get_date_range(start, end, strp_format=strp_format)
+        date_range = self.get_date_range(start_datetime, end_datetime)
         kwargs=deepcopy(self.kwargs)
         
         #Read data from database 
         for d in range(len(date_range)-1):
+            #Get filename
             file_start, file_end = date_range[d], date_range[d+1]
             file_name = self.get_filename(well_cd=well_cd, file_prefix=self.file_prefix, 
                                         start=file_start, end=file_end, file_suffix=self.file_suffix,
                                         strf_format=strf_format)
             kwargs['file']=file_name
+            logger.debug(f"Reading file: {file_name} from {self.connection_type} database.")
             try:
                 result = self.connection.read(sql=None, args={}, edit=[], orient='df', do_raise=False, **kwargs)
                 if result is not None:
                     result[self.datetime_index_column] = pd.to_datetime(result[self.datetime_index_column])
                     result.set_index(self.datetime_index_column,inplace=True)
-                    if start_datetime >= file_start: 
-                        start_,_ = self.get_output_time_slice(start_datetime, file_end,strp_format)
+                    
+                    #Slice output datetime if start and end dates are not the first day of month
+                    if start_datetime >= file_start.date(): 
+                        start_,_ = self.get_output_time_slice(start_datetime, file_end)
                         result = result.loc[start_:,:]            
-                    if end_datetime <= file_end:
-                        start_, end_ = self.get_output_time_slice(end_datetime.replace(day=1), end_datetime, strp_format)
+                    if end_datetime <= file_end.date():
+                        start_, end_ = self.get_output_time_slice(end_datetime.replace(day=1), end_datetime)
                         result = result.loc[:end_,:]
                     response[file_name] = result
             except Exception as e:
+                logger.debug(f"Error reading file: {file_name}, error message: {e}")
                 raise e 
 
         #Concatenate data to form a single dataframe 
         if concat:
+            logger.debug(f"Concatenating all read files.")
             try:
                 all_output = [data for data in response.values() if data is not None]
                 all_df =  pd.concat(all_output,axis=0,ignore_index=False)
                 return all_df
             except Exception as e:
-                logger.error(e)
+                logger.error(f"Error encountered trying to concatenate files: {e}")
                 return None
         return response
     
+    #TESTED
     def read_metadata(self, well_cd:str) -> pd.DataFrame: 
         """Read meta data from database. Metadata file name is well_cd_ROC_PROCESSED_DATA_LAST.csv 
 
@@ -376,6 +419,7 @@ class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
         Returns:
             pd.DataFrame: metadata dataframe
         """
+        logger.debug(f"Getting metadata for well: {well_cd}")
         kwargs = deepcopy(self.kwargs)
         file_name = self.get_metadata_name(well_cd, self.file_prefix, self.file_suffix)
         kwargs['file']=file_name
@@ -384,56 +428,19 @@ class Dataset(ABC_Dataset, PROCESSOR_MIXIN, FILENAMING_MIXIN):
             if result is not None: 
                 return {well_cd: result}
         except Exception as e:
+            logger.error(f"Error getting metadata for well: {well_cd}. Error message: {e}")
             raise e 
 
-    def get_metadata(self, wells: Sequence[str]) -> dict[str, pd.DataFrame]:
-        """Get metadata for a group of wells 
+    def process_data(self, data:pd.DataFrame) -> pd.DataFrame:
+        """Apply transformations to input data
 
         Args:
-            wells (Sequence[str]): list of well codes whose metadata will be fetched
+            data (pd.DataFrame): input data
 
         Returns:
-            dict[str, pd.DataFrame]: dictionary whose keys are the well codes and values are the metadata dataframe 
+            pd.DataFrame: transformed data
         """
-        metadata_dict = {}
-        for well in wells:
-            metadata_dict.update(self.read_metadata(well))
-        return metadata_dict 
-
-    def get_wells_dataset(self, wells:Sequence[str], start:str, end:str, strp_format='%Y-%m-%d',strf_format:str='%Y%m%d') -> dict[str,pd.DataFrame]:
-        """Fetch all data for either training or inference 
-
-        Args:
-            wells (Sequence[str]): group of wells 
-            start (str): start date 
-            end (str): end date 
-            strp_format (str, optional): input string format. Defaults to '%Y-%m-%d'.
-            strf_format (str, optional): output string format. Defaults to '%Y%m%d'.
-
-        Raises:
-            ValueError: if data frame is empty
-
-        Returns:
-            dict: dictionary whose key is the well code and value is the corresponding well inference data  
-        """
-        all_wells = {}
-        for well in wells:
-            well_df = self.read_data(well, start, end, concat=True, strp_format=strp_format, strf_format=strf_format)
-            if well_df is not None: 
-                well_df['WELL_CD'] = well
-                all_wells[well]=self.process_data(well_df, self.features, self.fill_method, self.normalise_params)
-            else:
-                all_wells[well]=None
-        return all_wells
-     
-if __name__ == "__main__":
-    import config.__config__ as base_config
-    config = base_config.init()
-    connection = aauconnect_(config['cfg_file_info'])
+        return self.process_data_(data, self.features, self.fill_method, self.normalise_params)
     
-    dataset = Dataset(connection, path="C:/Users/HoangLe/Desktop/Consilium_ROC_HOANG/app_prod/roc/PROCESSED_DATA",
-                      file_prefix="ROC_PROCESSED_DATA",file_suffix=".csv",bucket=config['cfg_s3_info']['bucket'], features=['ROC_VOLTAGE','FLOW','PRESSURE_TH'])
-    data_dict = dataset.read_data("ACRUS1","2016-11-04","2016-11-05",True)
-    print("End")
     
     

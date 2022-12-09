@@ -7,6 +7,7 @@ from sklearn.metrics import max_error, mean_absolute_error, mean_squared_error
 from sklearn.linear_model import LinearRegression
 from functools import cached_property
 from scipy.signal import savgol_filter 
+import datetime 
 
 def upper_IQR(x):
     return np.nanquantile(x, 0.75)  
@@ -218,6 +219,10 @@ class FeatureExtractor:
         self._verify_charging_fault_detection_dict(charging_fault_detection_dict)
         self._verify_weather_detection_dict(weather_detection_dict)
         self.agg_df = agg_df
+    
+    @cached_property
+    def trend_date(self)->datetime.datetime:
+        return self.agg_df.index.max()
     
     @cached_property
     def max_outage_length(self)->pd.Series:
