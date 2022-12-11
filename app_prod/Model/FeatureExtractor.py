@@ -199,20 +199,23 @@ class RWLS:
             return 30 
         return np.max(x_pred[index[0]] - len(y),0)
         
-
-
 class FeatureExtractor:
     def __init__(self, 
                  agg_df:pd.DataFrame,
-                 operation_correction_dict:dict={"gradient_threshold":0.025,"start":600,"end":1200},
                  anomaly_detection_dict:dict={"missing_length":360},
-                 data_outage_detection_dict:dict={"start":1100, "end":1440, "min_length":60, "missing_length":20},
-                 dawn_VOLTAGE_drop_detection_dict:dict={"first_derivative_threshold":0.4, "second_derivative_threshold":0.4,"use_second_derivative":True},
-                 charging_fault_detection_dict:dict={"max_error_threshold":0.08, "mean_absolute_error_threshold":0.02,"mean_squared_error_threshold":0.008,\
-                                                     "start":1000, "gradient_threshold":0.003},
+                 data_outage_detection_dict:dict={"start":1100, "end":1440, "missing_length":20, 
+                                                  "12V_cut_off":12.0, "24V_cut_off":22.5},
+                 dawn_VOLTAGE_drop_detection_dict:dict={"onset_first_derivate":0.005, "onset_second_derivative":0.002,
+                                                        "12V_cut_off":12.0, "24V_cut_off":22.5,
+                                                        "VOLTAGE_drop_gradient_threshold":-0.05,
+                                                        },
+                 charging_fault_detection_dict:dict={"max_error_threshold":0.08, 
+                                                     "mean_absolute_error_threshold":0.02,
+                                                     "mean_squared_error_threshold":0.008,
+                                                     "start":1000, 
+                                                     "gradient_threshold":0.003},
                  weather_detection_dict:dict={"end":400,"quantile":0.85,"weather_threshold":0.96,"window":30},
                  )->None:
-        self._verify_operation_correction_dict(operation_correction_dict)
         self._verify_anomaly_detection_dict(anomaly_detection_dict)
         self._verify_data_outage_detection_dict(data_outage_detection_dict)
         self._verify_dawn_VOLTAGE_drop_detection_dict(dawn_VOLTAGE_drop_detection_dict)
@@ -325,29 +328,29 @@ class FeatureExtractor:
         threshold = 11 if self.min_VOLTAGE.mean() <= 19 else 22 
         regression = RWLS(threshold, 0.25, 2)
         return self.min_VOLTAGE.rolling(window=15, min_periods=3).apply(lambda x: regression(x))
-    
-    def _verify_operation_correction_dict(self, data_dict:dict)->None:
-        gradient_threshold = 0.025 if 'gradient_threshold' not in data_dict else data_dict['gradient_threshold']
-        start = 600 if 'start' not in data_dict else data_dict['start']
-        end = 1200 if 'end' not in data_dict else data_dict['end']
-        self.operation_correction_dict={"gradient_threshold":gradient_threshold, "start":start, "end":end}
         
     def _verify_data_outage_detection_dict(self, data_dict:dict)->None:
-        min_length = 60 if 'min_length' not in data_dict else data_dict['min_length']
-        start = 1000 if 'start' not in data_dict else data_dict['start']
-        end = 1200 if 'end' not in data_dict else data_dict['end']
-        missing_length = 180 if "missing_length" not in data_dict else data_dict['missing_length']
-        self.data_outage_detection_dict={"min_length":min_length, "start":start, "end":end, "missing_length":missing_length}
+        start = 1100 if 'start' not in data_dict else data_dict['start']
+        end = 1440 if 'end' not in data_dict else data_dict['end']
+        missing_length = 20 if "missing_length" not in data_dict else data_dict['missing_length']
+        cut_off_12V = 12.0 if "12V_cut_off" not in data_dict else data_dict["12V_cut_off"]
+        cut_off_24V = 22.5 if "24V_cut_off" not in data_dict else data_dict["24V_cut_off"]
+        self.data_outage_detection_dict={"start":start, "end":end, "missing_length":missing_length, 
+                                         "12V_cut_off":cut_off_12V, "24V_cut_off":cut_off_24V}
         
     def _verify_anomaly_detection_dict(self, data_dict:dict)->None:
         missing_length = 180 if "missing_length" not in data_dict else data_dict['missing_length']
         self.anomaly_detection_dict={"missing_length":missing_length}
     
     def _verify_dawn_VOLTAGE_drop_detection_dict(self, data_dict:dict)->None:
-        first_derivative_threshold=0.4 if "first_derivative_threshold" not in data_dict else data_dict['first_derivative_threshold']
-        second_derivative_threshold=0.4 if "second_derivative_threshold" not in data_dict else data_dict["second_derivative_threshold"] 
-        use_second_derivate=True if "use_second_derivate" not in data_dict else data_dict["use_second_derivate"]
-        self.dawn_VOLTAGE_drop_detection_dict={"first_derivative_threshold":first_derivative_threshold, "second_derivative_threshold":second_derivative_threshold, "use_second_derivative":use_second_derivate}
+        cut_off_12V = 12.0 if "12V_cut_off" not in data_dict else data_dict["12V_cut_off"]
+        cut_off_24V = 22.5 if "24V_cut_off" not in data_dict else data_dict["24V_cut_off"]
+        onset_first_derivative=0.005 if "onset_first_derivative" not in data_dict else data_dict['onset_first_derivative']
+        onset_second_derivative=0.002 if "onset_second_derivative" not in data_dict else data_dict["onset_second_derivative"] 
+        VOLTAGE_drop_gradient_threshold = -0.05 if "VOLTAGE_drop_gradient_threshold" not in data_dict else data_dict["VOLTAGE_drop_gradient_threshold"]
+        self.dawn_VOLTAGE_drop_detection_dict={"onset_first_derivative":onset_first_derivative, "onset_second_derivative":onset_second_derivative,
+                                               "VOLTAGE_drop_gradient_threshold":VOLTAGE_drop_gradient_threshold,
+                                               "12V_cut_off":cut_off_12V, "24V_cut_off":cut_off_24V}
              
     def _verify_charging_fault_detection_dict(self, data_dict:dict)->None:
         max_error_threshold = 0.08 if "max_error_threshold" not in data_dict else data_dict["max_error_threshold"]
@@ -440,9 +443,9 @@ class FeatureExtractor:
         #Post processing for high voltage: 
         min_VOLTAGE = self.min_VOLTAGE.mean()
         if min_VOLTAGE < 19:
-            cut_off = 12
+            cut_off = self.data_outage_detection_dict['12V_cut_off']
         else: 
-            cut_off = 22.5
+            cut_off = self.data_outage_detection_dict['24V_cut_off']
         low_VOLTAGE_dates = self.min_VOLTAGE[self.min_VOLTAGE<=cut_off].index
         non_anommaly_dates = self.anomaly_label[self.anomaly_label==0].index
         label = label.loc[list(set(non_anommaly_dates)&set(low_VOLTAGE_dates))]
@@ -450,6 +453,17 @@ class FeatureExtractor:
         
     #TESTED
     def get_dawn_VOLTAGE_drop_features(self)->pd.DataFrame:
+        """Get dawn VOLTAGE drop features.
+        
+        Features include:
+            filtered data: smoothened data by applying savgol filter
+            first derivative: first derivative on smooth signal 
+            second derivative: second derivative on smooth signal
+            onset location: location at which the signal rises. This is to filter out period when the sun is up (rapid rise in Voltage signal)
+            filtered_data_onset: smooth signal until onset
+            first onset: first derivative until onset
+
+        """
         data = self.agg_df.ROC_VOLTAGE
         data = data[self.anomaly_label==0]
         def process_fn(x):
@@ -458,7 +472,8 @@ class FeatureExtractor:
             filter_data = savgol_filter(savgol_filter(x, window_length=10, polyorder=2),window_length=10,polyorder=1)
             first_derivative = np.gradient(filter_data)
             second_derivative = np.gradient(first_derivative)
-            onset_location = np.where((second_derivative>=0.002) & (first_derivative>=0.005))[0]
+            onset_location = np.where((second_derivative>=self.dawn_VOLTAGE_drop_detection_dict["onset_second_derivative"]) & 
+                                      (first_derivative>=self.dawn_VOLTAGE_drop_detection_dict["onset_first_derivative"]))[0]
             if len(onset_location)==0:
                 onset_location=len(first_derivative)
             else:
@@ -475,34 +490,35 @@ class FeatureExtractor:
     def get_dawn_VOLTAGE_drop_label(self)->pd.Series: 
         """Check for presence of battery failure that cause a sharp drop in ROC_VOLTAGE before dawn. 
         
-        This method computes the first and second derivatives and assigns labels by thresholding. This method works on interpolated data. 
+        Check to see if the gradient in the 20 minute window before onset is below a threshold 
         
-        Args: embedded in dawn_VOLTAGE_drop_detection_dict
-            first_derivative_threshold (float, optional): threshold of the first derivative. Defaults to 0.4.
-            second_derivative_threshold (float, optional): threshold of the second derivative. Defaults to 0.4.
-            use_second_derivate (bool, optional): whether to use 2nd derivative to derive label. Defaults to True.
-
         Returns:
             pd.Series: failure label. 0 - no failure, 1 - failure present 
         """
         min_VOLTAGE = self.min_VOLTAGE.mean()
         if min_VOLTAGE < 19:
-            cut_off = 11.8
+            cut_off = self.dawn_VOLTAGE_drop_detection_dict['12V_cut_off']
         else: 
-            cut_off = 22.5
+            cut_off = self.dawn_VOLTAGE_drop_detection_dict["24V_cut_off"]
         low_VOLTAGE_dates = self.min_VOLTAGE[self.min_VOLTAGE<=cut_off].index
 
         all_data = self.get_dawn_VOLTAGE_drop_features()
-        label = all_data["first_onset"].apply(lambda x: x[-20:].min()<-0.05)
+        label = all_data["first_onset"].apply(
+            lambda x: x[-20:].min()<self.dawn_VOLTAGE_drop_detection_dict["VOLTAGE_drop_gradient_threshold"])
         label = label.loc[list(set(label.index)&set(low_VOLTAGE_dates))]
         label.name = "labels"
         return label
 
-    #TODO
+    #TESTED
     def get_min_VOLTAGE_label(self)->pd.Series:
+        """Get failure labels by applying a threshold of minimum VOLTAGE
+
+        Returns:
+            pd.Series: labels
+        """
         mean_min_V = self.min_VOLTAGE.mean()
         if mean_min_V < 19:
-            cut_off = 11.0
+            cut_off = 11
         else:
             cut_off = 22
         label = (self.min_VOLTAGE <= cut_off).astype(int)

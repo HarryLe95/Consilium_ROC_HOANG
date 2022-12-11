@@ -1,5 +1,6 @@
 from Dataset.DataManager import DataManager
 from Dataset.Dataset import DataOperator
+from Model.ModelManager import ModelManager
 from utils.advancedanalytics_util import aauconnect_
 
 class ROC:
@@ -23,8 +24,12 @@ class ROC:
         self._validate_roc_config(roc_config)
         self.roc_config = roc_config 
         
+        self._validate_model_config(model_config)
+        self.model_config = model_config 
+        
         self.data_operator = DataOperator(**self.data_connection_config, **self.roc_config)
         self.data_manager = DataManager(wells= self.inference_wells,  data_operator=self.data_operator, **self.inference_config)
+        self.model_manager = ModelManager(**self.model_config)
         
     def _validate_inference_config(self, config:dict)->None:
         assert("run_mode" in config), f"inference_info must contain keyword 'run_mode'"
@@ -66,6 +71,9 @@ class ROC:
         assert("group_sql" in config), f"group_info must contain keyword 'group_sql'"
         assert("group_kwargs" in config), f"group_info must contain keyword 'group_kwargs'"
         assert("group_id" in config), f"group_info must contain keyword 'group_id'"
+    
+    def _validate_model_config(self, config:dict)->None:
+        pass
     
     def _get_group_info(self) -> dict:
         sql = self.group_config["group_sql"]
