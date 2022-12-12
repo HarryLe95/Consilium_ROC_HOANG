@@ -10,6 +10,15 @@ class ROC:
                  data_connection_config: dict,
                  roc_config:dict,
                  model_config:dict,):
+        """ROC Model trainer. Manage training and inference pipeline.
+
+        Args:
+            group_config (dict): dictionary of group keywords
+            inference_config (dict): dictionary of inference keywords
+            data_connection_config (dict): dictionary of data connection keywords
+            roc_config (dict): dictionary of roc config keywords
+            model_config (dict): dictionary of model config keywords 
+        """
         
         self._validate_group_config(group_config)
         self.group_config = group_config 
@@ -101,6 +110,16 @@ class ROC:
         self.data_manager.update_event_log(inference_dict, append)       
     
     def run_model_inference(self):
+        """Run inference pipeline:
+        
+        If run mode is live:
+            Fetch inference data 
+            Get inference result 
+            Update metadata information 
+            Update event log 
+        If run mode is backfill: 
+            Repeat the process from backfill start_date t0 backfill end_date
+        """
         if self.run_mode == "live":
             self.run_inference_(True)
         elif self.run_mode == "backfill":
