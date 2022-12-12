@@ -135,7 +135,7 @@ class FILENAMING_MIXIN:
     
     Methods:
         parse_date: parse input string to output date object
-        get_filename: parse filename components (well_code,dates,etc) and return the filename 
+        get_filename: parse filename components (well_cd,dates,etc) and return the filename 
         get_metadata_name: parse metadata components and return the file metadata
         get_date_range: return pd.DatetimeIndex from start to end 
         get_output_time_slice: return date slices for data fetching
@@ -198,7 +198,7 @@ class FILENAMING_MIXIN:
         """Get metadata filename that adheres to Santos' naming convention
 
         Example: 
-        >>> S3Manager.get_filename("TIRRA80","ROC_PROCESSED_DATA",".csv")
+        >>> S3Manager.get_metadata_name("TIRRA80","ROC_PROCESSED_DATA",".csv")
         >>> TIRRA80_ROC_PROCESSED_DATA_LAST.csv
         Args:
             well_cd (str): well_cd 
@@ -209,6 +209,23 @@ class FILENAMING_MIXIN:
             str: formatted filename 
         """
         return f'{well_cd}_{file_prefix}_LAST{file_suffix}'
+    
+    @classmethod 
+    def get_event_log_name(cls, well_cd:str, file_prefix:str, file_suffix:str=".csv")->str:
+        """Get event log filename that adheres to Santos' naming convention
+
+        Example: 
+        >>> S3Manager.get_event_log_name("TIRRA80","ROC_PROCESSED_DATA",".csv")
+        >>> TIRRA80_ROC_PROCESSED_DATA_EVENTS.csv
+        Args:
+            well_cd (str): well_cd 
+            file_prefix (str): file_prefix
+            file_suffix (str, optional): file_suffixension. Defaults to 'csv'.
+        
+        Returns:
+            str: formatted filename 
+        """
+        return f'{well_cd}_{file_prefix}_EVENTS{file_suffix}'
     
     #TESTED
     @classmethod
@@ -426,11 +443,75 @@ class DataOperator(PROCESSOR_MIXIN, FILENAMING_MIXIN):
         try: 
             result = self.connection.read(sql=None, args={}, edit=[], orient="df", do_raise=False, **kwargs)
             if result is not None: 
-                return {well_cd: result}
+                return result
         except Exception as e:
             logger.error(f"Error getting metadata for well: {well_cd}. Error message: {e}")
             raise e 
 
+    def write_metadata(self, metadata:pd.DataFrame, well_cd:str)->None:
+        """Write metadata to external database 
+
+        Args:
+            metadata (dict): metadata dataframe for one day inference
+            well_cd (str): well name
+
+        Raises:
+            e: exception caught
+        """
+        logger.debug(f"Updating metadata for well: {well_cd}")
+        kwargs = deepcopy(self.kwargs)
+        kwargs['append']=False
+        file_name = self.get_metadata_name(well_cd, self.file_prefix, self.file_suffix)
+        kwargs['file']=file_name
+        try:
+            self.connection.write(sql=None, args=metadata, **kwargs)
+        except Exception as e: 
+            logger.error(f"Error writing metadata")
+            raise e 
+    
+    def read_event_log(self, well_cd:str)->pd.DataFrame:
+        """Read event log from database 
+
+        Args:
+            well_cd (str): well to get event log from
+
+        Raises:
+            e: file not exist exception 
+
+        Returns:
+            pd.DataFrame: event log dataframe 
+        """
+        logger.debug(f"Reading event log data for well: {well_cd}")
+        kwargs = deepcopy(self.kwargs)
+        file_name = self.get_event_log_name(well_cd, self.file_prefix, self.file_suffix)
+        kwargs['file']=file_name
+        try: 
+            result = self.connection.read(sql=None, args={}, edit=[], orient="df", do_raise=False, **kwargs)
+            if result is not None: 
+                return result
+        except Exception as e:
+            logger.error(f"Error getting event log data for well: {well_cd}. Error message: {e}")
+            raise e  
+        
+    def write_event_log(self, event_output:pd.DataFrame, well_cd:str, append:bool)->None:
+        logger.debug(f"Updating event log for well: {well_cd}")
+        kwargs = deepcopy(self.kwargs)
+        kwargs['append']=False
+        file_name = self.get_event_log_name(well_cd, self.file_prefix, self.file_suffix)
+        
+        if append: #Append to event log logic
+            historical_log = self.read_event_log(well_cd)
+            if historical_log is not None:
+                event_output = pd.concat([historical_log, event_output], axis = 0)
+                
+        kwargs['file']=file_name
+        try:
+            self.connection.write(sql=None, args=event_output, **kwargs)
+        except Exception as e: 
+            logger.error(f"Error writing event log")
+            raise e 
+    
+    
     def process_data(self, data:pd.DataFrame) -> pd.DataFrame:
         """Apply transformations to input data
 

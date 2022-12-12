@@ -56,17 +56,12 @@ def main():
     args = arg_parser.run_arg_parser()
 
     logger.info("Instantiating connections")
-    state['inf_group_conf'] = aau.aauconnect_(config['inf_group_info'])
-    state['data_conf'] = aau.aauconnect_(config['data_info'])
-    state['log_conf'] = aau.aauconnect_(config['log_info'])
 
     # Group ids can be matched against instance hostnames to provide simple parallelisation
     if args.group_id > 0:
         groups = [args.group_id]
-    elif 'default_group_ids' in config:
-        groups = config['default_group_ids']
     else:
-        groups = [1]
+        groups = [0]
     state['alldatauptodate'] = False
     runstart = datetime.utcnow()
     while (True):
@@ -76,21 +71,19 @@ def main():
         state['alldatauptodate'] = True
         for group_id in groups:
             state['group_id'] = group_id
-            roc_model = ROC(state, config, aau.aauconnect_)
+            roc_model = ROC(config['group_info'],
+                            config['inference_info'],
+                            config['data_connection_info'],
+                            config['roc_info'],
+                            config['model_info'])
             if config['perform_model_training']:
                 logger.info("Model training start")
-                trained_model = ROC.run_model_training()
+                roc_model.run_model_training()
                 logger.info("Model training complete")
             if config['perform_model_inference']:
                 logger.info("Model inference start")
-                uptodate = ROC.run_model_inference(model=None, is_validation=config['is_validation'])
-                if not uptodate:
-                    state['alldatauptodate'] = False
+                roc_model.run_model_inference()
                 logger.info("Model inference complete")
-    ROC._write_log([{'TS': datetime.utcnow(), 'LOG_ENTRY': 'ROC System Finished', 'PRIORITY': 1}])
-
-
-#    determine from config whether to shut down after completion
 
 if __name__ == "__main__":
     main()

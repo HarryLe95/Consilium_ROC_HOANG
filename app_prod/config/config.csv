@@ -1,11 +1,13 @@
 KEY,VALUE,TYPE
 application_name,'ROC Config',str
+perform_model_training,False,bool
+perform_model_inference,True,bool
+maxruntime_seconds,100000,int
 inference_info,"{'run_mode' : 'backfill',
                  'backfill_start': '2018-01-01 00:00',
+                 'backfill_end': '2018-02-01 00:00',
                  'backfill_date_format' : '%Y-%m-%d %H:%M',
                  'inference_window' : 30,
-                 'perform_model_training' : False,
-                 'perform_model_inference': True,
                  'datetime_index_column' : 'TS'
                 }",dict
 data_connection_info,"{
@@ -30,6 +32,20 @@ group_info,"{
 			                 'args_ts': ['TSTART']},
             'group_id': 0,
            }",dict
+model_info,"{
+            'anomaly_detection_dict':{'missing_length':360},
+            'data_outage_detection_dict':{'start':1100, 'end':1440, 'missing_length':20, 
+                                          '12V_cut_off':12.0, '24V_cut_off':22.5},
+            'dawn_VOLTAGE_drop_detection_dict':{'onset_first_derivate':0.005, 'onset_second_derivative':0.002,
+                                                '12V_cut_off':12.0, '24V_cut_off':22.5,
+                                                'VOLTAGE_drop_gradient_threshold':-0.05},
+            'charging_fault_detection_dict':{'max_error_threshold':0.08, 
+                                             'mean_absolute_error_threshold':0.02,
+                                             'mean_squared_error_threshold':0.008,
+                                             'start':1000, 
+                                             'gradient_threshold':0.003},
+            'weather_detection_dict':{'end':400,'quantile':0.85,'weather_threshold':0.96,'window':30},
+            }",dict
 cfg_s3_info,"{'connection_type' : 's3',
               'user'   : None,
               'region' : 'ap-southeast-2',

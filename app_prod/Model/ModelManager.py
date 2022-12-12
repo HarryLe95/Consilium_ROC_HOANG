@@ -14,20 +14,24 @@ class ModelManager:
                              "1": "RuntimeExceptions encountered",
                              "2": "Insufficient data"}   
     
+    LOCAL_TIMEZONE = str(datetime.datetime.now(datetime.timezone.utc).astimezone().tzinfo)
+    
     FLOW_STATUS = {0: "Shut-In", 1: "Online"} 
     def __init__(self, **kwargs):
         self.model_kwargs = kwargs 
     
-    @classmethod 
-    def run_inference(cls, inference_data:dict[str,pd.DataFrame])->dict:
+    def run_inference(self, inference_data:tuple[dict[str,pd.DataFrame], dict[str,tuple]])->dict:
         logger.debug("Running inference for all wells.")
         all_responses = {}
-        for well in inference_data:
-            inference_df = inference_data[well]
-            all_responses[well] = cls.run_inference_(inference_df)
+        inference_df = inference_data[0]
+        inference_metadata = inference_data[1]
+        for well in inference_df:
+            well_inference_df = inference_df[well]
+            well_inference_metadata = inference_metadata[well]
+            all_responses[well] = self.run_inference_(well_inference_df, well_inference_metadata)
         return all_responses
     
-    def run_inference_(self, inference_df:pd.DataFrame)->dict:
+    def run_inference_(self, inference_df:pd.DataFrame, inference_metadata:pd.DataFrame)->dict:
         response = {"TREND_DATE":None,
                     "WELL_STATUS":None,
                     "FAILURE_CATEGORY":"Normal", 
@@ -48,10 +52,18 @@ class ModelManager:
                     "NOTIFICATION_FLAG":"F",                    
                     "SENSOR_FAULT":"F",
                     "DEAD_CELL":"F"}
+        start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         if inference_df is None:
-            return {"inference_status":2, "body": None, "message": "Insufficient data for inference"} 
+            return {"inference_status":2, 
+                    "body": None, 
+                    "message": "Insufficient data for inference", 
+                    "start_time":start_time, 
+                    "end_time":start_time, 
+                    "tzinfo":self.LOCAL_TIMEZONE,
+                    "inference_first_TS": inference_metadata[0].strftime("%Y-%m-%d %H:%M"),
+                    "inference_last_TS": inference_metadata[1].strftime("%Y-%m-%d %H:%M")} 
         status = 0
-        exception_message = None
+        exception_message = "Inference run successfully"
         feature_extractor = FeatureExtractor(inference_df, **self.model_kwargs)
         try:
             trend_date = feature_extractor.trend_date
@@ -99,5 +111,8 @@ class ModelManager:
         except Exception as exception_message:
             logger.log(f"Errors encountered when running inference. Exception encountered: {exception_message}")            
             status = 1
-        return {"inference_status":status, "body": response, "message": exception_message} 
+        end_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        return {"inference_status":status, "body": response, "message": exception_message, "start_time": start_time, "end_time": end_time, 
+                "tzinfo": self.LOCAL_TIMEZONE, "inference_first_TS": inference_metadata[0].strftime("%Y-%m-%d %H:%M"),
+                "inference_last_TS": inference_metadata[1].strftime("%Y-%m-%d %H:%M")} 
         

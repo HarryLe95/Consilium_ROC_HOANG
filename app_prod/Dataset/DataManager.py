@@ -55,7 +55,7 @@ class DataManager:
         """
         if self.run_mode == "live":
             logger.debug("Getting metadata in live mode.")
-            return self.data_operator.get_metadata(self.wells)
+            return {well:self.data_operator.read_metadata(well) for well in self.wells}
         elif self.run_mode == "backfill": 
             try:
                 logger.debug("Getting metadata in backfill mode.") 
@@ -66,18 +66,40 @@ class DataManager:
                 raise e 
     
     #TODO update this later 
-    def update_metadata(self, inference_output:dict) -> None: 
+    def update_metadata(self, inference_output:dict, append:bool=True) -> None: 
         """Update metadata based on inference output
 
         Args:
-            inference_output (dict): _description_
+            inference_output (dict): dictionary of inference output 
+            append (bool): whether to append the new metadata information or to overwrite. Defaults to True
         """
         for well in inference_output: 
-            status = inference_output[well]['status']
+            status = inference_output[well]['inference_status']
+            message = inference_output[well]['message']
+            start_time = inference_output[well]['start_time']
+            end_time = inference_output[well]['end_time']
+            tzinfo = inference_output[well]['tzinfo']
+            inf_first_TS = inference_output[well]['inference_first_TS']
+            inf_last_TS = inference_output[well]['inference_last_TS']
             if status == 0: 
-                current_date = datetime.strptime(self.metadata[well][self.datetime_index_column][0],"%Y-%m-%d %H:%M")
-                next_date = current_date + timedelta(days=1)
-                self.metadata[well][self.datetime_index_column] = next_date.strftime("%Y-%m-%d %H:%M")
+                next_date = datetime.strptime(inf_first_TS,"%Y-%m-%d %H:%M") + timedelta(days=1)
+                next_date = next_date.strftime("%Y-%m-%d %H:%M")
+            else:
+                next_date = inf_first_TS    
+            output= pd.DataFrame({'status':status, 'message': message, 'start_time': start_time, 'end_time': end_time, 'tzinfo':tzinfo, 
+                                  'inf_first_TS':inf_first_TS, 'inf_last_TS': inf_last_TS, self.datetime_index_column:next_date}, index = [0])
+            if append:
+                output = pd.concat([self.metadata[well],output],axis=0)
+            self.metadata[well] = output
+            self.data_operator.write_metadata(output, well)
+            
+    def update_event_log(self, inference_output:dict, append:bool) -> None:
+        for well in inference_output:
+            status = inference_output[well]['inference_status']
+            body = inference_output[well]['body']
+            if status == 0:
+                output = pd.DataFrame(body, index=[0])
+                self.data_operator.write_event_log(output, well, append)
     
     def get_inference_day_dataset_(self, well:str) -> tuple[datetime.date,pd.DataFrame]|None:
         """Get data for the inference day. Inference day is the last day (day in the last row) of the corresponding metadata
@@ -91,10 +113,11 @@ class DataManager:
         inf_start = datetime.strptime(self.metadata[well][self.datetime_index_column].values[-1], "%Y-%m-%d %H:%M").date()
         inf_end = inf_start + timedelta(days=1)
         inf_data = self.data_operator.read_data(well, inf_start, inf_end)
+        inf_end_actual = inf_data.index.max()
         if len(inf_data)<1440:
             logger.error(f"Insufficient inference data for well: {well}")
-            return None
-        return (inf_start,inf_data)
+            return (inf_start, inf_end_actual, None)
+        return (inf_start,inf_end_actual,inf_data)
             
     def get_inference_dataset(self) -> dict[str, np.ndarray]:
         """Get inference dataset 
@@ -102,11 +125,12 @@ class DataManager:
         Returns:
             dict[str, np.ndarray]: dictionary of inference data 
         """
-        inference_dataset = {} 
+        inference_dataset = {}
+        metadata_dataset = {} 
         for well in self.wells:
-            inference_day_data = self.get_inference_day_dataset_(well)
-            if inference_day_data is not None:
-                inf_start, inf_day_df = inference_day_data
+            inf_start, inf_end, inf_day_df = self.get_inference_day_dataset_(well)
+            metadata_dataset[well] = (inf_start, inf_end)
+            if inf_day_df is not None:
                 window_start = inf_start - timedelta(days=self.inference_window-1)
                 window_end = inf_start - timedelta(days=1)
                 supp_day_df = self.data_operator.read_data(well, window_start, window_end)
@@ -114,7 +138,7 @@ class DataManager:
                 inference_dataset[well] = self.data_operator.process_data(inf_df)
             else:
                 inference_dataset[well] = None
-        return inference_dataset
+        return inference_dataset, metadata_dataset
 
     #TODO 
     def get_training_dataset(self) -> dict[str, np.ndarray]:

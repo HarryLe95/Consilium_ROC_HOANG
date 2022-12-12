@@ -2,7 +2,7 @@ from Dataset.DataManager import DataManager
 from Dataset.Dataset import DataOperator
 from Model.ModelManager import ModelManager
 from utils.advancedanalytics_util import aauconnect_
-
+import datetime
 class ROC:
     def __init__(self,
                  group_config:dict,
@@ -18,6 +18,12 @@ class ROC:
         
         self._validate_inference_config(inference_config)
         self.inference_config = inference_config
+        self.run_mode = self.inference_config["run_mode"]
+        if self.run_mode == "backfill":
+            self.backfill_start = self.inference_config["backfill_start"]
+            if "backfill_end" not in self.inference_config:
+                self.inference_config['backfill_end'] = (datetime.date.today() - datetime.timedelta(days=1)).strftime("%Y-%m-%d %H:%M")
+            self.backfill_end = self.inference_config["backfill_end"]
         
         self._validate_data_connection_config(data_connection_config)
         self.data_connection_config = data_connection_config
@@ -39,8 +45,6 @@ class ROC:
                 'backfill_start' keyword."
             assert("backfill_date_format" in config), f"Keyword 'backfill_date_format' must be provided in inference_info dictionary"
         assert("inference_window" in config), f"inference_info must contain keyword 'inference_window'"
-        assert("perform_model_training" in config), f"inference_info must contain keyword 'perform_model_training'"
-        assert("perform_model_inference" in config), f"inference_info must contain keyword 'perform_model_inference'"
         assert("datetime_index_column" in config), f"inference_info must contain keyword 'datetime_index_column'"
 
     def _validate_general_connection_config(self, config:dict, parent_config:str)->None:
@@ -82,77 +86,39 @@ class ROC:
         connection = aauconnect_(self.group_config["group_connection_info"])
         return connection.read(sql=sql, args=args, edit=[], orient='records', do_raise=True, **kwargs)
 
-    def _store_event_data(self, df):
-        well_cd = self._state['WELL_CD']
-        sql = self._config['store_event_sql']
-        args = df
-        kwargs = self._config['store_event_kwargs']
-        if 'file_prefix' in kwargs:
-            kwargs['file_prefix'] = kwargs['file_prefix'].format(well_cd)
-        return self._state['output_data_con'].write_many(sql=sql, args=args, edit=[], do_raise=True, **kwargs)
-
-    def _store_time_data(self, df):
-        well_cd = self._state['WELL_CD']
-        sql = self._config['store_timedata_sql']
-        args = df
-        kwargs = self._config['store_timedata_kwargs']
-        if 'file_prefix' in kwargs:
-            kwargs['file_prefix'] = kwargs['file_prefix'].format(well_cd)
-        return self._state['output_data_con'].write_many(sql=sql, args=args, edit=[], do_raise=True, **kwargs)
-
     def run_model_training(self):
         pass
     
     def _get_model_training_data(self):
         pass
 
-    def get_inference_dataset(self):
+    def get_inference_dataset(self)->tuple[dict,dict]:
         return self.data_manager.get_inference_dataset()
     
-    def run_inference(self):
-        return self.model_manager.run_inference(self.get_inference_dataset())
+    def run_inference_(self, append:bool=False):
+        inference_dict = self.model_manager.run_inference(self.get_inference_dataset())
+        self.data_manager.update_metadata(inference_dict, append)
+        self.data_manager.update_event_log(inference_dict, append)       
     
-    def get_nextrun(self, well_cd:str):
-        pass
-
-    def store_run_data(self, well_cd):
-        next_run = self._state['processed_wells'][well_cd]['next_run']
-        args = {}
-        for key, value in next_run.items():
-            args[key] = [value]
-        sql = self._config['store_rundata_sql']
-        kwargs = self._config['store_rundata_kwargs']
-        if 'file' in kwargs:
-            kwargs['file'] = kwargs['file'].format(well_cd)
-        self._state['output_data_con'].write_many(sql=sql, args=args, edit=[], do_raise=True, **kwargs)
-        self._state['processed_wells'][well_cd]['last_run'] = next_run
-        self._state['processed_wells'][well_cd]['next_run'] = None
-
-    def _write_log(self, record):
-        sql = self._config['log_sql']
-        kwargs = self._config['log_kwargs']
-        self._state['log_con'].write(sql=sql, args=record, edit=[], do_raise=True, **kwargs)
-
-
-    def get_eventhistory(self, well_cd):
-        well_state = self._state['processed_wells'][well_cd]
-        sql = self._config['event_history_sql']
-        kwargs = self._config['event_history_kwargs']
-        if 'file_prefix' in kwargs:
-            kwargs['file_prefix'] = kwargs['file_prefix'].format(well_cd)
-            kwargs['start'] = well_state['start']
-            kwargs['end'] = well_state['end']
-        args = {'WELL_CD': well_cd, 'S': well_state['start'], 'E': well_state['end']}
-        df = self._state['output_data_con'].read(sql=sql, args=args, edit=[], orient='df', do_raise=False, **kwargs)
-        return df
-
-    def run_model_inference(self, model=None, is_validation: bool = False) -> bool:
-        pass
+    def run_model_inference(self):
+        if self.run_mode == "live":
+            self.run_inference_(True)
+        elif self.run_mode == "backfill":
+            start_time = datetime.datetime.strptime(self.backfill_start, "%Y-%m-%d %H:%M")
+            end_time = datetime.datetime.strptime(self.backfill_end, "%Y-%m-%d %H:%M")
+            append = False
+            while start_time != end_time:
+                self.run_inference_(append)
+                append = True
+                start_time += datetime.timedelta(days=1)
 
 if __name__ == "__main__":
     import config.__config__ as base_config
-    import config.__state__ as base_state
     config = base_config.init()
-    model = ROC(config['group_info'],config['inference_info'],config['data_connection_info'],config['roc_info'])
-    data = model.data_manager.get_inference_dataset()
+    model = ROC(config['group_info'],
+                config['inference_info'],
+                config['data_connection_info'],
+                config['roc_info'],
+                config['model_info'])
+    model.run_model_inference()
     print("END")
