@@ -1,6 +1,6 @@
 from utils.advancedanalytics_util import S3
 from pathlib import Path
-from utils.PathManager import Paths 
+from utils.PathManager import PathManager as Paths 
 from datetime import datetime  
 import pandas as pd
 from botocore.errorfactory import ClientError

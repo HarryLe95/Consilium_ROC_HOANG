@@ -4,18 +4,26 @@ perform_model_training,False,bool
 perform_model_inference,True,bool
 maxruntime_seconds,100000,int
 inference_info,"{'run_mode' : 'backfill',
-                 'backfill_start': '2018-01-01 00:00',
-                 'backfill_end': '2018-02-01 00:00',
+                 'backfill_start': '2022-06-01 00:00',
+                 'backfill_end': '2022-07-01 00:00',
                  'backfill_date_format' : '%Y-%m-%d %H:%M',
                  'inference_window' : 30,
                  'datetime_index_column' : 'TS'
                 }",dict
-data_connection_info,"{
+data_connection_info_,"{
                 'connection_type' : 'file',
                 'path' : 'C:/Users/HoangLe/Desktop/Consilium_ROC_HOANG/app_prod/ROC/PROCESSED_DATA',
                 'partition_mode' : None,
                 'file_prefix' : 'ROC_PROCESSED_DATA',
                 'file_suffix' : '.csv'}",dict
+data_connection_info,"{'connection_type' : 's3',
+              'user'   : None,
+              'region' : 'ap-southeast-2',
+              'bucket' : 'aa-roc-model-1-task0355600-poc-syd-174396275689',
+              'path' : 'ROC/PROCESSED_DATA',
+              'file_prefix' : 'ROC_PROCESSED_DATA',
+              'file_suffix' : '.csv',
+              'partition_mode' : None}",dict
 roc_info,"{
             'features': ['ROC_VOLTAGE','FLOW','PRESSURE_TH'],
             'fill_method': 'zero',
@@ -23,7 +31,7 @@ roc_info,"{
           }",dict
 group_info,"{
             'group_connection_info' : {'connection_type' : 'file', 
-			                           'path' : 'C:/Users/HoangLe/Desktop/Consilium_ROC_HOANG/app_prod/config',
+			                           'path' : 'C:/Users/Administrator/Desktop/Consilium_ROC_HOANG/app_prod/config',
 			                           'file' : 'MODEL_GROUP.csv', 
 			                           'partition_mode' : None},
             'group_sql': 'SELECT * FROM MODEL_GROUP WHERE GROUP_ID = :GROUP_ID',
@@ -46,14 +54,7 @@ model_info,"{
                                              'gradient_threshold':0.003},
             'weather_detection_dict':{'end':400,'quantile':0.85,'weather_threshold':0.96,'window':30},
             }",dict
-cfg_s3_info,"{'connection_type' : 's3',
-              'user'   : None,
-              'region' : 'ap-southeast-2',
-              'bucket' : 'aa-roc-model-1-task0355600-poc-syd-174396275689',
-              'path' : 'ROC/PROCESSED_DATA',
-              'file_prefix' : 'ROC_PROCESSED_DATA',
-              'file_suffix' : '.csv',
-              'partition_mode' : None}",dict
+
 
 
                 
