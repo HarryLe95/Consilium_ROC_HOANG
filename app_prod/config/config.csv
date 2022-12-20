@@ -31,7 +31,7 @@ roc_info,"{
           }",dict
 group_info,"{
             'group_connection_info' : {'connection_type' : 'file', 
-			                           'path' : 'C:/Users/Administrator/Desktop/Consilium_ROC_HOANG/app_prod/config',
+			                           'path' : 'C:/Users/HoangLe/Desktop/Consilium_ROC_HOANG/app_prod/config',
 			                           'file' : 'MODEL_GROUP.csv', 
 			                           'partition_mode' : None},
             'group_sql': 'SELECT * FROM MODEL_GROUP WHERE GROUP_ID = :GROUP_ID',
