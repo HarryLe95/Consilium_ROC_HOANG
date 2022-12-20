@@ -4,19 +4,19 @@ perform_model_training,False,bool
 perform_model_inference,True,bool
 maxruntime_seconds,100000,int
 inference_info,"{'run_mode' : 'backfill',
-                 'backfill_start': '2022-06-01 00:00',
-                 'backfill_end': '2022-07-01 00:00',
+                 'backfill_start': '2016-06-01 00:00',
+                 'backfill_end': '2016-07-01 00:00',
                  'backfill_date_format' : '%Y-%m-%d %H:%M',
                  'inference_window' : 30,
                  'datetime_index_column' : 'TS'
                 }",dict
-data_connection_info_,"{
+data_connection_info,"{
                 'connection_type' : 'file',
                 'path' : 'C:/Users/HoangLe/Desktop/Consilium_ROC_HOANG/app_prod/ROC/PROCESSED_DATA',
                 'partition_mode' : None,
                 'file_prefix' : 'ROC_PROCESSED_DATA',
                 'file_suffix' : '.csv'}",dict
-data_connection_info,"{'connection_type' : 's3',
+data_connection_info_,"{'connection_type' : 's3',
               'user'   : None,
               'region' : 'ap-southeast-2',
               'bucket' : 'aa-roc-model-1-task0355600-poc-syd-174396275689',
