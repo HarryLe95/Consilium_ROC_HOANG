@@ -4,8 +4,8 @@ perform_model_training,False,bool
 perform_model_inference,True,bool
 maxruntime_seconds,100000,int
 inference_info,"{'run_mode' : 'backfill',
-                 'backfill_start': '2016-06-01 00:00',
-                 'backfill_end': '2016-07-01 00:00',
+                 'backfill_start': '2018-06-01 00:00',
+                 'backfill_end': '2018-07-01 00:00',
                  'backfill_date_format' : '%Y-%m-%d %H:%M',
                  'inference_window' : 30,
                  'datetime_index_column' : 'TS'
@@ -27,7 +27,7 @@ data_connection_info_,"{'connection_type' : 's3',
 roc_info,"{
             'features': ['ROC_VOLTAGE','FLOW','PRESSURE_TH'],
             'fill_method': 'zero',
-            'datetime_index_column' : 'TS'
+            'datetime_index_column' : 'DTSMIN'
           }",dict
 group_info,"{
             'group_connection_info' : {'connection_type' : 'file', 

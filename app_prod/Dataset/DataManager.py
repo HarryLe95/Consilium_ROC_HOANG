@@ -106,6 +106,7 @@ class DataManager:
         for well in inference_output:
             status = inference_output[well]['STATUS']
             body = inference_output[well]['BODY']
+            body["WELL_CD"] = well
             if status == 0:
                 output = pd.DataFrame(body, index=[0])
                 if append: #Append to event log logic
