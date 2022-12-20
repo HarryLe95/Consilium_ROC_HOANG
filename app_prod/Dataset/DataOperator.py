@@ -309,6 +309,9 @@ class DataOperator(PROCESSOR_MIXIN, FILENAMING_MIXIN):
             setup: setup database connection based on specified keywords 
             read_data: read tag data from database 
             read_metadata: read metadata from database 
+            read_event_log: read event log from database 
+            write_metadata: write metadata to database 
+            write_event_log: write event log to database 
             process_data: transform raw data for analytic purposes 
 
         Args:
@@ -360,7 +363,6 @@ class DataOperator(PROCESSOR_MIXIN, FILENAMING_MIXIN):
             logger.error("Data connection uninitialised.")
             raise ValueError("Data connection uninitialised.")
     
-    #TESTED
     def read_data(self, well_cd:str, start:str|datetime.date, end:str|datetime.date, concat:bool=True, strp_format='%Y-%m-%d',strf_format:str='%Y%m%d') -> dict|pd.DataFrame:
         """Read well data from database 
         
@@ -423,7 +425,6 @@ class DataOperator(PROCESSOR_MIXIN, FILENAMING_MIXIN):
                 return None
         return response
     
-    #TESTED
     def read_metadata(self, well_cd:str) -> pd.DataFrame: 
         """Read meta data from database. Metadata file name is well_cd_ROC_PROCESSED_DATA_LAST.csv 
 
@@ -464,7 +465,7 @@ class DataOperator(PROCESSOR_MIXIN, FILENAMING_MIXIN):
         file_name = self.get_metadata_name(well_cd, self.file_prefix, self.file_suffix)
         kwargs['file']=file_name
         try:
-            self.connection.write(sql=None, args=metadata, **kwargs)
+            self.connection.write_many(sql=None, args=metadata, **kwargs)
         except Exception as e: 
             logger.error(f"Error writing metadata")
             raise e 
@@ -493,24 +494,17 @@ class DataOperator(PROCESSOR_MIXIN, FILENAMING_MIXIN):
             logger.error(f"Error getting event log data for well: {well_cd}. Error message: {e}")
             raise e  
         
-    def write_event_log(self, event_output:pd.DataFrame, well_cd:str, append:bool)->None:
+    def write_event_log(self, event_output:pd.DataFrame, well_cd:str)->None:
         logger.debug(f"Updating event log for well: {well_cd}")
         kwargs = deepcopy(self.kwargs)
         kwargs['append']=False
-        file_name = self.get_event_log_name(well_cd, self.file_prefix, self.file_suffix)
-        
-        if append: #Append to event log logic
-            historical_log = self.read_event_log(well_cd)
-            if historical_log is not None:
-                event_output = pd.concat([historical_log, event_output], axis = 0)
-                
+        file_name = self.get_event_log_name(well_cd, self.file_prefix, self.file_suffix)        
         kwargs['file']=file_name
         try:
-            self.connection.write(sql=None, args=event_output, **kwargs)
+            self.connection.write_many(sql=None, args=event_output, **kwargs)
         except Exception as e: 
             logger.error(f"Error writing event log")
             raise e 
-    
     
     def process_data(self, data:pd.DataFrame) -> pd.DataFrame:
         """Apply transformations to input data
@@ -522,6 +516,7 @@ class DataOperator(PROCESSOR_MIXIN, FILENAMING_MIXIN):
             pd.DataFrame: transformed data
         """
         return self.process_data_(data, self.features, self.fill_method, self.normalise_params)
+
     
     
     

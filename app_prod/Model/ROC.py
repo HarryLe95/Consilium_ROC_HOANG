@@ -1,5 +1,5 @@
 from Dataset.DataManager import DataManager
-from Dataset.Dataset import DataOperator
+from Dataset.DataOperator import DataOperator
 from Model.ModelManager import ModelManager
 from utils.advancedanalytics_util import aauconnect_
 import datetime

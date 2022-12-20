@@ -5,10 +5,14 @@ import logging
 import pandas as pd 
 import numpy as np 
 
-from Dataset.Dataset import DataOperator
+from Dataset.DataOperator import DataOperator
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
+def concat_no_exception(dfs:Sequence[pd.DataFrame|None],axis=0)->pd.DataFrame:
+    all_df = [df for df in dfs if df is not None]
+    return pd.concat(all_df,axis=axis)
 
 class DataManager: 
     def __init__(self,
@@ -16,7 +20,7 @@ class DataManager:
                  run_mode:str,
                  backfill_start:str,
                  data_operator:DataOperator,
-                 inference_window:int=30,
+                 inference_window:int=60,
                  datetime_index_column:str="TS",
                  **kwargs,
                  ):
@@ -65,7 +69,6 @@ class DataManager:
                 logger.error(f"Error getting backfill mode metadata. Error Message: {e}")
                 raise e 
     
-    #TODO update this later 
     def update_metadata(self, inference_output:dict, append:bool=True) -> None: 
         """Update metadata based on inference output
 
@@ -74,32 +77,54 @@ class DataManager:
             append (bool): whether to append the new metadata information or to overwrite. Defaults to True
         """
         for well in inference_output: 
-            status = inference_output[well]['inference_status']
-            message = inference_output[well]['message']
-            start_time = inference_output[well]['start_time']
-            end_time = inference_output[well]['end_time']
-            tzinfo = inference_output[well]['tzinfo']
-            inf_first_TS = inference_output[well]['inference_first_TS']
-            inf_last_TS = inference_output[well]['inference_last_TS']
+            status = inference_output[well]['STATUS']
+            start_time = inference_output[well]['START_TS']
+            end_time = inference_output[well]['END_TS']
+            inf_first_TS = inference_output[well]['FIRST_TS']
+            inf_last_TS = inference_output[well]['LAST_TS']
             if status == 0: 
                 next_date = datetime.strptime(inf_first_TS,"%Y-%m-%d %H:%M") + timedelta(days=1)
                 next_date = next_date.strftime("%Y-%m-%d %H:%M")
             else:
                 next_date = inf_first_TS    
-            output= pd.DataFrame({'status':status, 'message': message, 'start_time': start_time, 'end_time': end_time, 'tzinfo':tzinfo, 
-                                  'inf_first_TS':inf_first_TS, 'inf_last_TS': inf_last_TS, self.datetime_index_column:next_date}, index = [0])
+            output= pd.DataFrame({'STATUS':status, 'START_TS': start_time, 'END_TS': end_time,  
+                                  'FIRST_TS':inf_first_TS, 'LAST_TS': inf_last_TS, self.datetime_index_column:next_date}, index = [0])
             if append:
-                output = pd.concat([self.metadata[well],output],axis=0)
+                output = concat_no_exception([self.metadata[well],output],axis=0)
             self.metadata[well] = output
             self.data_operator.write_metadata(output, well)
-            
+    
+    def get_event_log(self)->dict[str,pd.DataFrame]:
+        try:
+            logger.debug("Getting event log")
+            return {well:self.data_operator.read_event_log(well) for well in self.wells}
+        except Exception as e: 
+            logger.error(f"Error getting event log from database. Error message: {e}")
+            raise e 
+    
     def update_event_log(self, inference_output:dict, append:bool) -> None:
         for well in inference_output:
-            status = inference_output[well]['inference_status']
-            body = inference_output[well]['body']
+            status = inference_output[well]['STATUS']
+            body = inference_output[well]['BODY']
             if status == 0:
                 output = pd.DataFrame(body, index=[0])
-                self.data_operator.write_event_log(output, well, append)
+                if append: #Append to event log logic
+                    historical_log = self.data_operator.read_event_log(well)
+                    output = concat_no_exception([historical_log, output], axis = 0)
+                self.data_operator.write_event_log(output, well)
+    
+    def combine_event_log(self)->pd.DataFrame:
+        event_log_dict ={well:self.data_operator.read_event_log(well).iloc[[-1],:] for well in self.wells} 
+        metadata_dict = {well:self.data_operator.read_metadata(well).iloc[-1,:] for well in self.wells}
+        all_data = []
+        for well in self.wells:
+            if metadata_dict[well]["status"] == 0:
+                all_data.append(event_log_dict[well])
+        notification_df = concat_no_exception(all_data,axis=0)
+        return self.post_process_event_log(notification_df)
+    
+    def post_process_event_log(self, event_log:pd.DataFrame)->pd.DataFrame:
+        return event_log
     
     def get_inference_day_dataset_(self, well:str) -> tuple[datetime.date,pd.DataFrame]|None:
         """Get data for the inference day. Inference day is the last day (day in the last row) of the corresponding metadata
